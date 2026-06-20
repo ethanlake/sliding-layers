@@ -61,6 +61,13 @@ mutable struct SimulationState
     acceptance_table::Matrix{Float64}
     single_layer::Bool
     mag_sum::Int  # running sum of all spins (top + bottom), for O(1) magnetization
+    # Cumulative top-chain shift count, mod L. The top array is NEVER physically
+    # rotated — instead, shift_chain! just increments top_offset, and cross-chain
+    # interactions use this offset to look up the correct partner. This makes
+    # shift_chain! O(1) instead of O(L); see core.jl for the indexing convention.
+    # Mapping: the top spin at *legacy slot* i (the slot it would occupy after
+    # physical rotation) is stored at storage index `mod1(i - top_offset, L)`.
+    top_offset::Int
 end
 
 """
@@ -73,7 +80,7 @@ function SimulationState(L::Int, beta::Float64, h::Float64, v::Float64)
     bottom = ones(Int8, L)
     n_sub = v == 0.0 ? L : round(Int, L / v)
     acceptance_table = build_acceptance_table(beta, h)
-    return SimulationState(top, bottom, L, beta, h, v, n_sub, acceptance_table, false, 2L)
+    return SimulationState(top, bottom, L, beta, h, v, n_sub, acceptance_table, false, 2L, 0)
 end
 
 """
@@ -86,7 +93,9 @@ function SimulationState(L::Int, beta::Float64, h::Float64)
     top = ones(Int8, L)
     bottom = ones(Int8, L)
     acceptance_table = build_acceptance_table_single(beta, h)
-    return SimulationState(top, bottom, L, beta, h, 0.0, L, acceptance_table, true, L)
+    # top_offset is meaningless in single-layer mode (no shifts, no cross bonds);
+    # we still store it to keep the struct layout uniform.
+    return SimulationState(top, bottom, L, beta, h, 0.0, L, acceptance_table, true, L, 0)
 end
 
 """

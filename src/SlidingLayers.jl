@@ -12,6 +12,7 @@ include("ffs.jl")
 include("energy.jl")
 include("teff.jl")
 include("erosion_test.jl")
+include("phase_diagram.jl")
 include("simulation.jl")
 
 export SimulationState, run_simulation

@@ -3,7 +3,8 @@
                       T_equil, T_sample, kwargs...)
 
 Run simulation in energy mode:
-- If vary_v=false (default): fix v, sweep p = exp(β) over linspace(p_min, p_max, n_steps)
+- If vary_v=false (default): fix v, sweep p = exp(-β J) over linspace(p_min, p_max, n_steps)
+  Convention: 0 < p ≤ 1.
 - If vary_v=true: fix p, sweep v over linspace(v_min, v_max, n_steps)
 - For each parameter value, run one long simulation and estimate steady-state energy and heat flow
 - Parallelized over sweep values
@@ -14,16 +15,20 @@ function run_energy_mode(; L::Int, v::Float64, h::Float64, p::Float64,
                           p_min::Float64, p_max::Float64,
                           v_min::Float64, v_max::Float64,
                           n_steps::Int, vary_v::Bool,
-                          T_equil::Int, T_sample::Int, kwargs...)
+                          T_equil::Int, T_sample::Int,
+                          sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
+                          kwargs...)
+    sweep_p = sweep_values_override
     if vary_v
         sweep_values = collect(range(v_min, v_max, length=n_steps))
         p_fixed = p
-        beta_fixed = log(p_fixed)
+        beta_fixed = -log(p_fixed)
         println("=== Sliding Ising Chain: Energy Mode (sweeping v) ===")
         println("L = $L, p = $p_fixed (β = $(@sprintf("%.4f", beta_fixed)))")
         println("v values: $sweep_values")
     else
-        sweep_values = collect(range(p_min, p_max, length=n_steps))
+        sweep_values = sweep_p === nothing ?
+            collect(range(p_min, p_max, length=n_steps)) : sweep_p
         println("=== Sliding Ising Chain: Energy Mode (sweeping p) ===")
         println("L = $L, v = $v")
         println("p values: $sweep_values")
@@ -45,7 +50,7 @@ function run_energy_mode(; L::Int, v::Float64, h::Float64, p::Float64,
             @printf("  [Thread %d] v = %.3f: equilibrating (%d time units)...\n", tid, v_cur, T_equil)
         else
             v_cur = v
-            beta_val = log(val)
+            beta_val = -log(val)
             @printf("  [Thread %d] p = %.3f (β = %.4f): equilibrating (%d time units)...\n", tid, val, beta_val, T_equil)
         end
 

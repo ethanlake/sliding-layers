@@ -1,0 +1,20 @@
+  Activating project at `~/Research/GitHub/sliding-layers`
+=== Sweep n_configs_per_run at p=3.0 (defaults M=0.75, tcp=0.15) ===
+lambda_0 for p=3.00: 0.9892 (m*=0.9970 ± 0.0031)
+  n_per_run=40                                        log_tau = 8.978, empirical_std = 0.589, binomial_stderr = 0.054, n_ok = 12/12, 1.4s
+  n_per_run=100                                       log_tau = 9.107, empirical_std = 0.288, binomial_stderr = 0.035, n_ok = 12/12, 2.7s
+  n_per_run=200                                       log_tau = 8.957, empirical_std = 0.099, binomial_stderr = 0.025, n_ok = 12/12, 5.5s
+  n_per_run=400                                       log_tau = 8.956, empirical_std = 0.115, binomial_stderr = 0.017, n_ok = 12/12, 9.9s
+
+=== Sweep target_crossing_prob at p=3.0 (n_per_run=200, M=0.75) ===
+  tcp=0.10                                            log_tau = 9.011, empirical_std = 0.207, binomial_stderr = 0.026, n_ok = 10/10, 5.1s
+  tcp=0.25                                            log_tau = 9.123, empirical_std = 0.189, binomial_stderr = 0.029, n_ok = 10/10, 3.6s
+  tcp=0.40                                            log_tau = 8.840, empirical_std = 0.426, binomial_stderr = 0.030, n_ok = 10/10, 3.4s
+
+=== Sweep M_threshold at p=3.0 (n_per_run=200, tcp=0.15) ===
+  M_thr=0.50                                          log_tau = 9.483, empirical_std = 0.258, binomial_stderr = 0.028, n_ok = 10/10, 10.0s
+  M_thr=0.25                                          log_tau = 9.582, empirical_std = 0.180, binomial_stderr = 0.028, n_ok = 10/10, 20.0s
+
+=== At p=4 (n_per_run=200, M=0.75, tcp=0.15) — sanity ===
+lambda_0 for p=4.00: 0.9980 (m*=0.9997 ± 0.0007)
+  p=4, n_per_run=200                                  log_tau = 12.005, empirical_std = 0.195, binomial_stderr = 0.031, n_ok = 10/10, 5.4s

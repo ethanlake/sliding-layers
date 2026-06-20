@@ -1,0 +1,202 @@
+\documentclass[12pt]{article}
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}
+\usepackage[a4paper,
+left=1.1in,right=1.1in,top=1.1in,bottom=1.3in]{geometry}
+\providecommand{\cp}{}
+\input{ethans_preamble.tex}
+\usepackage{tikz}
+%\usepackage{tableof}
+%\AtBeginDocument{\tofOpenTocFileForWrite}
+
+
+\usepackage{subcaption}
+%\newcommand{\mytitle}[1]{\title{\textsf{\underline{ #1 }}}}
+%\renewcommand{\uvmu}{{\boldsymbol{\hat\mu}}}
+%\usepackage{booktabs}
+%\usepackage{fontspec}
+%\setmainfont{Palatino}
+%\usepackage{pxfonts}
+%\usepackage{newpxtext}
+%\usepackage{newpxmath}
+\newcommand{\plog}{p_{\sf log}}
+\newcommand{\tdec}{T_{\sf dec}}
+\newcommand{\poly}{{\rm poly}}
+\newcommand{\kmax}{{k_{\rm max}}}
+\newcommand{\ler}{\ell_{\sf er}}
+\newcommand{\tmem}{t_{\sf mem}}
+\newcommand{\prl}{{||}}
+\newcommand{\dr}{{\sfD \sfR}}
+\renewcommand{\ler}{{\xi_{\sf er}}}
+
+\begin{document}
+	\title{Supplementary Material}
+	\author{Ethan Lake}
+	\date{\today} 
+	\maketitle 
+
+\begin{figure*}
+	\centering 
+	\includegraphics[width=.7\tw]{tlv_fig.pdf}
+	\caption{\label{fig:tlv_fig} How a minority domain of size $l$ is eroded under ideal sliding dynamics at $\b \ra \infty$, which maps to a version of Toom's two-line-voting automaton. The white regions have zero magnetization, and are metastable. The red arrows indicate interfaces that move with expected speed $v-\d$, and the purple arrows those that move with expected speed $v+\d$. The danger region $\dr(l)$ indicated by the triangle $\bfA\bfB\bfC$ is the spacetime region where spin flips in the metastable zero-magnetization area can propagate to prevent the erosion of the $m=-2$ (red) part of the initial minority domain.  } 
+\end{figure*}
+
+This file contains supplementary information supporting the main paper.
+
+\tableofcontents
+
+\section{Size of the danger region} \label{sec:danger}
+
+In this section we derive a simple formula for the size of the danger region quoted in the main text. Consider the erosion of a minority domain of size $l$ under $\b \ra \infty$ sliding dynamics. The spacetime history of such a domain's erosion is shown in Fig.~\ref{fig:tlv_fig}. One of the danger regions $\dr(l)$ is shown as the triangle $\bfA\bfB\bfC$. 
+
+Putting the origin of coordinates at the center of the minority domain, the spacetime coordinates of the points $A,B$ in Fig.~\ref{fig:tlv_fig} are, by simple geometric considerations, 
+\bea (t_A,x_A) & = (0,l/2) \\ 
+(t_B,x_B) & = \(\frac l{2(v-\d)},0\),\eea 
+and the coordinates of $C$ are determined from the two equations 
+\bea \frac{x_C - l/2}{v-\d} & = t_C  \\ 
+\frac{x_C}{v+\d} & = t_B - t_C,\eea
+which gives 
+\be x_C-l/2  = \frac{l\d}{2v}.\ee 
+Therefore the area of the danger region is 
+\bea |\dr(l)| & = \frac12 |\bfA\bfC \times \bfA\bfB| \\ & = \frac12 | (x_C-l/2),t_C) \times (-l/2 , t_B)| \\ & = \frac{l^2 \d}{4v(v-\d)},\eea 
+giving the result quoted in the main text. 
+
+\section{Phase diagram in the $v\ra \infty$ limit}
+
+When $v \ra \infty$, the dynamics enters a simple mean-field limit: one chain couples randomly to sites of the other, seeing only (in expectation) the other chain's average magnetization. Since the two chains are statistically the same, we expect the dynamics in this limit to be governed by thermal dynamics with respect to the time-{\it independent} Hamiltonian 
+\be H = - \sum_i \( (J \lan s\ran + h) s_i + J s_is_{i+1}\)\ee
+where we have included an additional external magnetic field $h$ for completeness.  
+We then solve for $\lan s\ran$ using a self-consistency equation derived from the exact expression for the average magnetization of a 1d Ising model in a field $\eta=J \lan s \ran + h$. This is easily arrived at using the transfer matrix approach. Recall that the transfer matrix is 
+\be T = \bpm e^{\b (J+\eta)} & e^{-\b J} \\ e^{-\b J} & e^{\b(J-\eta)} \epm,\ee 
+and the free energy density is 
+\be F = -\frac1\b \ln \l_+,\ee 
+with $\l_+$ the largest eigenvalue of $T$. Some algebra gives 
+\be F = -J - \frac1\b \ln\( \cosh(\b \eta) + \sqrt{\cosh^2(\b\eta) - 2e^{-2\b J} \sin(2\b J)}\).\ee 
+Taking the derivative with respect to $\eta$ then gives the magnetization 
+\be m = \frac{\sinh(\b \eta)}{\sqrt{\cosh^2(\b \eta) - 2e^{-2\b J} \sinh(2\b J)}}.\ee 
+In the present mean-field model, we thus have the self-consistent relation 
+\be \lan s \ran = \frac{\sinh(\b (J \lan s\ran + h))}{\sqrt{\cosh^2(\b (J \lan s \ran + h) - 2e^{-2\b J} \sinh(2\b J)}}.\ee 
+Working in units where $J=1$ then gives the following phase diagram: 
+\be \igpfc{sliding_mf_pd.pdf}\ee 
+where we show the value of $\lan s\ran$ in the less stable minimum (if multiple minima exist). 
+
+\section{Details about forward-flux sampling}
+\label{sec:ffs}
+
+At low enough $T$ and large enough $v$, our prediction for the scaling of $\tmem$ rapidly becomes so large that confirming this prediction with a direct Monte-Carlo (MC) measurement of $\tmem$ is infeasible. We instead estimate $\tmem$ using forward-flux sampling (FFS) \cite{allen2009forward}, a rare-event method that factorizes the long crossing time into a product of conditional crossing probabilities, each of which is $O(1)$ and can be measured directly. This section spells out how FFS is implemented in our code and how the various tuning parameters are chosen. All  source files referenced below are in the public repository \cite{code} (the FFS routines themselves live in \texttt{src/ffs.jl}).
+
+\ss{Setup}
+
+We use the (signed) total magnetization per spin as the FFS order parameter (reaction coordinate),
+\be \label{eq:m_def} m \equiv \frac{1}{2L} \sum_{i=1}^L \( s^{(\sft)}_i + s^{(\sfb)}_i \) \in [-1,+1].\ee
+Our simulations use single-spin Glauber dynamics at inverse temperature $\b$, interleaved with the sliding shift: in our time units, one time step consists of $2L$ attempted spin flips interleaved with $v$ rigid translations of the top chain by one lattice site, with the translations spaced at regular intervals (see \texttt{src/core.jl}).
+
+The metastable basin $A$ consists of configurations near the all-$+$ state, and the absorbing basin $B$ consists of configurations with $m \leq m_*$, where $m_*$ is the \texttt{ M\_threshold} parameter in the code, which we take to be $1/2$ in numerics. 
+%The exact choice of $m_*$ is not very important, as any value comfortably past the free-energy barrier (in our case, past $m=0$) gives the same asymptotic scaling for $\tmem$. 
+
+\medskip 
+
+The intuition behind FFS is that even when the full barrier-crossing probability per unit time is very small in some control parameter, the {\it conditional} probability of advancing a small step up the barrier---given that the system has already made its way partway up---is of order unity. Concretely, we introduce a sequence of non-intersecting interfaces
+\be \label{eq:interfaces} m_0 > m_1 > m_2 > \cdots > m_n = m_*\ee
+in the $m$, lying between basin $A$ and basin $B$. The mean first-passage time $\tmem$ from $A$ to $B$ then admits the standard FFS factorization \cite{allen2009forward}
+\be \label{eq:ffs_master} \tmem^{-1} \approx \Phi_0 \prod_{k=1}^n P_k,\ee
+where $\Phi_0$ is the flux of forward crossings of $m_0$ in trajectories confined to basin $A$, and $P_k$ is the conditional probability that a trajectory which has just crossed $m_{k-1}$ for the first time subsequently reaches $m_k$ before returning to basin $A$. Each $P_k$ and $\Phi_0$ is by construction $O(1)$, so the right-hand side of \eqref{eq:ffs_master} can be quickly evaluated even when $\tmem$ itself is very large.
+
+%The estimator \eqref{eq:ffs_master} is closely related to (and identifies $\tmem$ with) the mean first-passage time from $A$ to $B$. For the dynamics considered here, the barrier-crossing dynamics is well approximated by a Poisson process, so the mean first-passage time coincides with the timescale appearing in the exponential tail of the magnetization-decay distribution, which is what we report as $\tmem$ in the main text.
+
+\ss{Phase 0: initial flux}
+
+The first ingredient is the basin-$A$ flux $\Phi_0$ through the first interface $m_0$. We initialize a configuration in the all-$+$ state and let it equilibrate within basin $A$ for a short time (see \texttt{measure\_initial\_flux} in \texttt{src/ffs.jl}). We then run a long trajectory, monitoring $m(t)$ at every integer time step. Each time $m$ crosses $m_0$ from above we record the configuration (this is a ``forward crossing''); after such a crossing we wait for $m$ to return above $m_0$ before counting the next one, so that consecutive crossings are independent excursions. If during one of these excursions $m$ falls below the absorbing threshold $m_*$ we terminate the trajectory and start a new one in basin $A$. Calling $\mathcal{T}$ the total time spent in basin $A$ across all such trajectories and $N_0$ the number of forward crossings, we estimate
+\be \label{eq:phi0} \Phi_0 \approx N_0 / \mathcal{T}, \qquad \mathrm{Var}(\ln \Phi_0) \approx 1/N_0.\ee
+The ensemble $\mathcal{C}_0 = \{C_0^{(1)}, \dots, C_0^{(N_0)}\}$ of recorded configurations serves as the source for the next phase. We run our simulations until the size of each $\mcc_k$ reaches a fixed value $n_{\rm configs}$, set with the \texttt{--n\_configs\_per\_run} command-line argument in the code. We use $n_{\rm configs} \sim 15,000$ for the numerical results in the paper. 
+
+\ss{Placement of the first interface}
+
+The first interface $m_0$ should be far enough into basin $A$ that crossings are reasonably frequent, but far enough from the all-$+$ state that the recorded configurations are genuinely partway up the barrier rather than typical fluctuations within $A$. We choose the interface magnetization adaptively by first measuring the metastable mean magnetization $\overline{m}_A$ and its standard deviation $\sigma_A$ from a brief (ten time steps) run started in the all-$+$ state, and then setting
+\be m_0 = \overline{m}_A - 2.5 \, \sigma_A.\ee
+This puts $m_0$ in the lower tail of the metastable distribution: crossings occur often enough that $\Phi_0$ converges quickly, but the configurations recorded already represent fluctuations distinguishable from typical $A$-states (if $m_0 \le m_*$ then the transition is not actually a rare event and the FFS estimate is reported as failed).
+
+\ss{Phase $k$: interface advancement}
+
+Given a source ensemble $\mathcal{C}_{k-1}$ at interface $m_{k-1}$, we measure $P_k$ by firing trial trajectories from configurations drawn uniformly from $\mathcal{C}_{k-1}$. Each trial evolves under the same dynamics, with two stopping conditions:
+\begin{itemize}
+\item {\bf success}: the trial reaches $m \le m_k$, and its endpoint configuration is appended to the new source ensemble $\mathcal{C}_k$.
+\item {\bf failure}: the trial returns above a {\it failure boundary} $m_{\rm fail}$, defined below.
+\end{itemize}
+We continue firing trials until $|\mathcal{C}_k| = n_{\rm configs}$ successful endpoint configurations have been collected. Letting $N_k^{\rm tot}$ be the total number of trials fired at phase $k$ (successes plus failures),
+\be P_k \approx n_{\rm configs}/N_k^{\rm tot}, \quad \mathrm{Var}(\ln P_k) \approx (1-P_k)/(P_k N_k^{\rm tot}).\ee
+
+It occasionally proves numerically helpful to use a {\it lookback failure boundary} when defining $m_{\rm fail}$: rather than declaring failure whenever a trial returns above $m_0$, we declare failure only when the trial returns above $m_{\max(k-K,0)}$, where $K = 7$ is a fixed integer (\texttt{n\_lookback} in the code). 
+%This speeds up the run, as failures are detected sooner, and reduces wasted trials at phases where the adaptive procedure (below) happens to place consecutive interfaces close together.
+
+\ss{Adaptive interface placement}
+
+Equation \eqref{eq:ffs_master} is exact for any choice of interfaces, but the variance of the estimator depends strongly on their placement. The optimal choice is to equalize the $P_k$s, since for fixed total computational budget the relative error is minimized when each interface costs the same number of trials. We achieve this by placing each new interface adaptively.
+
+Given the source ensemble $\mathcal{C}_{k-1}$ at interface $m_{k-1}$, we fire $n_{\rm configs}$ exploratory trials. Each trial runs until it either falls below $m_*$ or returns above the lookback failure boundary, and we record the minimum magnetization $m_{\min}^{(j)}$ reached by trial $j$. Sorting $\{m_{\min}^{(j)}\}$ in ascending order and letting $\alpha \in (0,1)$ be a target conditional crossing probability (the \texttt{--target\_crossing\_prob} command-line argument; we use $\alpha = 0.25$ by default), we set
+\be m_k = m_{\min}^{(\lceil \alpha n_{\rm configs} \rceil)}.\ee
+By construction, a fraction $\approx \alpha$ of trajectories launched from $\mathcal{C}_{k-1}$ will reach $m_k$ before returning, so $P_k \approx \alpha$ to within sampling noise. 
+
+As an alternative, the code also supports a {\it canonical} mode (the \texttt{--n\_interfaces} command-line argument set to a positive integer) in which the interfaces are placed uniformly between $m_0$ and $m_*$ and $m_{\rm fail} = m_0$ is held throughout; this is useful in regimes where there is no genuine metastable barrier, but is not used for any data shown in the main text.
+
+
+\ss{Combining the phases}
+
+Once all phases have run, the estimator \eqref{eq:ffs_master} gives
+\be \label{eq:tmem_estimator} \log \tmem = -\log \Phi_0 - \sum_{k=1}^n \log P_k\ee
+with statistical variance
+\be \label{eq:tmem_var} \mathrm{Var}(\ln \tmem) \approx \frac{1}{N_0} + \sum_{k=1}^n \frac{1-P_k}{P_k N_k^{\rm tot}}.\ee
+The dominant cost of an FFS estimation is the number of interfaces $n$ times the number of trials per interface. For the data shown in the main text we use $n_{\rm configs} = 15,000$ and usually have around 10-20 interfaces; with these choices, the data displayed in the main text can be obtained in a few tens of minutes on a laptop. 
+
+\ss{Isolating the nucleation rate} \label{ss:isolating_nucleation_rate} 
+
+As discussed in the main text, relaxation in the systems we are concerned with is nucleation-limited rather than aggregation-limited. 
+The logic is as follows: once a supercritical droplet forms at size $\ler$, it grows after a time $t$ to size $\sim \ler + \sqrt{D t}$, coditioned on its size not dropping below $\ler$ at any point; here $D$ is the (noise-dependent) diffusion constant of the random walk executed by a well-isolated domain wall. The probability that the size of the droplet does not drop below $\ler$ by time $t$ is however $\sim 1/\sqrt{D t}$, so the total size the droplet contributes in expectation is independent of $D$ and $t$. 
+
+This means that the scaling of $\tmem$ is set by the nucleation time of a supercritical droplet, and is independent of $D$ to leading order. 
+To estimate the scaling of $\tmem$ most efficiently in FFS numerics, we therefore compute the memory time on a system of size $L = c \ler$, where $c$ is a constant of order unity (we fix $c = 5$ in our numerics). 
+
+\ss{Independent repetitions and error bars}
+
+To check that the variance estimate \eqref{eq:tmem_var} is not dominated by tail effects or by an unlucky choice of source ensembles, we repeat the entire FFS procedure $n_{\rm rep}$ times for each choice of parameters point (this is the \texttt{--n\_repeats} command-line argument; we use $n_{\rm rep} =5$ for the data shown in the main text), each repeat using independent seeds and independent adaptive interface placements. We report the mean of $\log_{10} \tmem$ across the $n_{\rm rep}$ runs, with error bars given by
+\be \sigma_{\log \tmem} = \max \( \frac{1}{\ln 10}\sqrt{ \frac{\overline{\mathrm{Var}(\ln \tmem)}}{n_{\rm rep}} }, \, \frac{\mathrm{std}(\log_{10} \tmem)}{\sqrt{n_{\rm rep}}} \) ,\ee
+where the first argument is the (square root of the) mean intrinsic FFS variance \eqref{eq:tmem_var}  and the second is the empirical standard error across the $n_{\rm rep}$ repeats. 
+
+\section{Memory in the GKL automaton}
+
+\ss{Setup and background}
+
+In this section we investigate the relaxation dynamics of the noisy GKL automaton \cite{gacs1978one} under noise of strength $\ep \in [0,1]$ and bias $\eta \in [-1,1]$. In this dynamics, the spins all update synchronously in discrete time, and each spin is subjected to an error with probability $\ep$. When an error occurs, a spin is replaced by $\pm1$ with probaiblity $(1\pm \eta)/2$.
+
+It was proven in \cite{park1997ergodicity} that there is a positive constant $\eta_c>0$ such that 
+\be \tmem = e^{\ct(\log^2 \ep)} \qq \forall \, \,\eta \in [-1, -\eta_c] \cup [\eta_c , 1],\ee 
+where $\ct$ denotes scaling with respect to $\ep$. The general proof strategy is quite simple to summarize: following a similar argument as in Sec.~\ref{sec:danger}, one concludes that the erosion length in the GKL automaton is, in the $\ep\ll1$ limit 
+\be \label{gkller} \ler \sim \frac1{\sqrt \ep},\ee 
+where the $\sim$ omits $\ep$-independent factors. 
+Since an error that occurs in the danger region can grow a minority domain of size $l$ to one of size $\l l$ with $\l > 1$, growing a domain to size $\ler$ only requires $\log_\l \ler$ steps. Thus 
+\be \label{gkl_tmem} \tmem \sim \ep^{-\log_\l \ler} = e^{-\ct(\log ^2\ep)}.\ee 
+
+While Ref.~\cite{park1997ergodicity} did not make rigorous statements about the case of unbiased noise, the physical arguments above do not depend crucially on taking $\eta \neq 0$. However, in \cite{de1992gacs} it was proposed from direct Monte Carlo numerics that in fact $\tmem = e^{\ct(1/\ep)}$ when $\eta = 0$. Unfortunately, distinguishing between $e^{\ct(1/\ep)}$ and $e^{\ct( \log^2 \ep)}$ is very difficult in naive Monte Carlo, especially with the limited range of $\ep$ values accessible in \cite{de1992gacs}. In what follows, we revisit this question with more precise numerics. 
+
+\ss{Scaling of the erosion length} 
+
+First, we numerically confirm that \eqref{gkller} holds regardless of $\eta$. This is done using the same procedure as used for the sliding Ising model, and gives 
+\be \igpfc{gkl_ler.pdf} \ee 
+as predicted. 
+
+\ss{Domain wall diffusion} 
+
+Once formed, a supercritical droplet of size $l > \ler$ has endpoints which undergo biased diffusion, with the sign of the bias determined by $\eta$. We can numerically estimate $D(\ep)$ by preparing a system in a state with $s_{i<L/2} = +1, s_{i\geq L/2} = -1$, and computing the diffusion constant of the domain wall position $x_{dw} = \sum_i (s_i + 1)/2$. Doing this at zero bias and with a system of size $L=4000$ gives $D(\ep) \propto 1/\sqrt\ep$:  
+\be \igpfc{gkl_diffusion_constant}.\ee 
+The behavior of $D$ is tangential to the discussion of $\tmem$ however, since relaxation is nucleation-limited rather than coalesence-limited, for the same reason as in the sliding Ising chain context, c.f. Sec.~\ref{ss:isolating_nucleation_rate}. 
+
+\ss{Scaling of $\tmem$} 
+
+We now numerically check \eqref{gkl_tmem} with the FFS technique, using the adaptive system size protocol of Sec.~\ref{ss:isolating_nucleation_rate}. We set $m_*=1/2$ and $n_{\rm configs} = 15,000$. 
+Plotting $\tmem$ against $(\log(1/\ep))^2$, we find 
+\be \igpfc{gkl_tmem_vslog} \ee 
+The same data plotted against $1/\ep$ clearly reveal that \eqref{gkl_tmem} fits the data better: 
+\be \igpfc{gkl_tmem_vsq} \ee 
+
+\bibliography{paper.bib}
+
+\end{document}

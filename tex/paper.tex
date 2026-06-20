@@ -1,0 +1,222 @@
+%
+\documentclass[prl,aps,twocolumn,groupedaddress,superscriptaddress,preprintnumbers]{revtex4-2}
+\include{ethans_preamble.tex} 
+\usepackage[caption=false]{subfig}
+\usepackage{overpic}
+\usepackage{tikz}
+% Helper: include an image at width=\linewidth with a bold label superimposed
+% at the top-left corner. Uses TikZ so placement is independent of image aspect.
+\newcommand{\labeledfig}[2]{%
+  \begin{tikzpicture}[inner sep=0pt, outer sep=0pt,
+                      baseline=(current bounding box.north)]
+    \node[anchor=north west] (image) at (0,0) {\includegraphics[width=\linewidth]{#1}};
+    \node[anchor=north west, inner sep=2pt] at (image.north west) {{\bf #2}};
+  \end{tikzpicture}%
+}
+
+\usepackage{enumitem}
+\def\dbar{{\mathchar'26\mkern-12mu d}}
+%
+\usepackage{amsthm}
+\usepackage{physics}
+%
+%
+%
+
+\usepackage{bm}
+
+%
+\newcommand{\diff}[1]{d#1}
+%
+\renewcommand{\bot}{\bigotimes} 
+\DeclarePairedDelimiter\ceil{\lceil}{\rceil}
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+\DeclarePairedDelimiterX{\infdivx}[2]{(}{)}{%
+	#1\;\delimsize\|\;#2%
+}
+\newcommand{\infdiv}{D\infdivx}
+\newcommand{\spt}{\mathsf{SPT}}
+\newcommand{\ssb}{\mathsf{SSB}}
+\newcommand{\para}{\mathsf{PARA}}
+
+\renewcommand{\bs}{{\sf BS}}
+\newcommand{\typdehn}{\ob{{\sf Dehn}}}
+\newcommand{\el}{{\sf EL}}
+\newcommand{\dehn}{{\sf Dehn}}
+\newcommand{\dyn}{{\sf Dyn}}
+\newcommand{\cg}{{\mathsf{CG}}}
+%
+\newtheorem*{theorem*}{Theorem}
+\newtheorem{prop}{Proposition}
+%
+%
+%
+%
+\newtheorem{definition}{Definition}
+\newtheorem{observation}{Observation}
+\newtheorem{assumption}{Assumption}[section]
+
+%
+\renewcommand\qq{\qquad}
+\renewcommand\cp{\Phi}
+\newcommand{\gs}{\text{GS}}
+\renewcommand{\la}{\leftarrow} 
+\renewcommand{\bot}{\bigotimes} 
+\newcommand{\q}[1]{ \ms {\it Question: #1} \\ \ms }
+\newcommand{\maj}{\mathsf{maj}}
+\usepackage{accents}
+\newcommand{\ub}[1]{\underline{#1}}
+\newcommand{\ut}[1]{\underaccent{\sim}{#1}} 
+\newcommand{\rem}{\mathsf{rem}}
+\newcommand{\oEE}{\mathop{\mathbb{E}}}
+\newcommand{\diam}{{\mathsf{diam}}}
+\newcommand{\irr}{{\mathsf{irr}}}
+\newcommand{\ltot}{{L}}
+\newcommand{\hfroz}{{\mathcal{H}_{\rm froz}}}
+\newcommand{\lc}{{L_{\rm cons}}}
+\newcommand{\tmem}{{t_{\sf mem}}}
+\newcommand{\ler}{{\xi_{\sf er}}} % erosion length
+\newcommand{\dr}{{\sfD \sfR}}
+\begin{document}
+	
+	
+	\title{Long-lived memory in sliding spin chains}
+		\author{Ethan Lake}
+	\email[Electronic address:$~~$]{elake@berkeley.edu}
+	\affiliation{Department of Physics, University of California Berkeley, Berkeley, CA 94720, USA}
+	\begin{abstract}
+		In this work, we do cool shit. 
+	\end{abstract}
+	
+	\maketitle
+	
+	\section{Introduction}
+	
+	Memory in physical systems is interesting. 
+	
+	
+	Memory in 1d is especially interesting, and poorly understood. 
+	
+	In this paper, we consider spin systems that retain a single bit of memory in the sign of their magnetization. 
+	We consequently define the memory time $\tmem$ as
+	\be \tmem = \oEE \min_{s = \pm 1}  \{ t \, : \,  |m(t)| <1/2 \, , \, m(0) = s\} \ee 
+	where the constant $1/2$ is chosen rather arbitrarily.	 $\tmem$ sets a lower bound on the mixing time.
+	
+	 Consider the case of Glauber dynamics run at temperature $T$ for the 1d Ising chain with coupling $J$. Once a minority domain (of any size) is formed, its endpoints will execute unbiased random walks. Since the energy cost for a minority domain is $\Delta E = 4J$, it is thus easy to show that $\tmem < b e^{4\b J}$, where $b$ is a constant. More generally, for {\it any} classical system undergoing dynamics obeying detailed balance with respect to a local Hamiltonian $H$, general physical arguments show $\tmem < b e^{c \b J}$, where $J$ is the largest local energy scale in $H$, and $c$ is another constant.  
+	
+	In this paper, we show that subjecting a ferromagnetic 1d Ising model on a two-leg ladder to a very simple type of nonequilibrium drive can significantly increase $\tmem$. We drive the system out of equilibrium by sliding the two legs of the ladder past one another at a relative velocity $v$, as illustrated in Fig.~\ref{fig:overview}~{\bf a}. More precisely, letting $s^{(\sft / \sfb)}_i \in \{ \pm 1\}$ be the $i$th spin on the top / bottom leg of the ladder, we consider Glauber dynamics at temperature $T$ under the time-dependent Hamiltonian \footnote{The floor and ceiling functions in this expression are not important, and can be replaced by a smoother kernel like $\sum_i \sum_j f(i-j+vt) s_i^{(\sft)} s_j^{(\sfb)}$ with e.g. $f(x) \sim e^{-x^2/{2\s^2}}$ without qualitatively changing the physics. } 
+	\be H(t) = - J \sum_{i;a\in\{\sft,\sfb\}} s^{(a)}_i s^{(a)}_{i+1} - J \sum_i s^{(\sft)}_{\lfloor i-vt/2 \rfloor} s^{(\sfb)}_{\lceil i+vt/2\rceil}  .\ee 
+
+		Let us work in units of time where each spin experiences on average one Glauber update per unit time. When $v=0$, the dynamics is simply that of a static two-leg Ising chain, and $\tmem \sim e^{c \b J}$ for constant $c$. The main result of this work is to show that $\tmem$ is significantly increased when $v$ is greater than a constant threshold. In particular, we give analytic arguments---and verify in numerics---that as long as $v > 2$,  
+	\be \label{main_result} \tmem \gtrsim b e^{4(\b J)^2 v (\ln v + c)}\ee
+	where $b,c$ are positive constants that are independent of $v,\b J$ in the limits $v,\b J\gg1$. While $\tmem$ is finite in the thermodynamic limit for all $T$, it rapidly gets astronomically large as $T\ra 0$. For example, when $T = J/2$ and $v=3$, we find numerically that $\tmem \sim 10^{50}$ (see below for more details). 
+	The remainder of this paper is dedicated to understanding and expanding upon this result. 
+	
+	\begin{figure*}[t]
+		\centering
+		\begin{minipage}[t]{0.32\textwidth}
+			\labeledfig{sliding_schematic}{a)}\\[1ex]
+			\labeledfig{phase_diagram}{b)}
+		\end{minipage}\hfill
+		\begin{minipage}[t]{0.32\textwidth}
+			\labeledfig{annotated_clean_history}{c)}
+		\end{minipage}\hfill
+		\begin{minipage}[t]{0.32\textwidth}
+			\labeledfig{noisy_history}{d)}
+		\end{minipage}
+		\caption{\label{fig:overview} {\bf a)} Schematic of the dynamics. Two ferromagnetically coupled ferromagnetic 1d Ising chains slide past one another at relative velocity $v$, and both couple to a bath at temperature $T$. {\bf b)} Dynamic phase diagram in the $e^{\b J}$-$v$ plane. In the blue shaded region, $\tmem \sim e^{\b J ve^{\b J}}$, while in the white region the scaling crosses over to the trivial $\tmem \sim e^{\b J}$ \ethan{need constants in the exponents etc.}. The pink points are drawn by fixing $e^{\b J}$, and then finding the smallest value of $v$ such that $\tmem(v) >  10 \tmem(0)$. {\bf c)} A spacetime history of the magnetization, with $\b = \infty, v = 2$. The indicated purple and red arrows denote interfaces that move with expected speeds $v + \d$ and $v-\d$, respectively. {\bf d)} A history with $\b = 2, v = 2$, with the minority domain in the initial state having size $l > \ler$.  }
+	\end{figure*}
+	
+	\begin{figure}
+		\centering 
+		\includegraphics[width=.45\tw]{tlv_fig.pdf}
+		\caption{\label{fig:proof} How a minority domain of size $l$ is eroded under ideal sliding dynamics at $\b \ra \infty$. The white regions have zero magnetization, and are metastable. The red arrows indicate interfaces that move with expected speed $v-\d$, and the purple arrows those with speed $v+\d$. The danger region $\dr(l)$ indicated by the shaded triangle is the spacetime region where spin flips in the metastable zero-magnetization area can propagate to prevent the erosion of the $m=-2$ (red) part of the initial minority domain. } 
+	\end{figure}
+	
+	\begin{figure*}[t]
+			\centering
+		\begin{minipage}[t]{0.24\textwidth}
+			\labeledfig{xier_vs_p}{a)}
+		\end{minipage}\hfill
+		\begin{minipage}[t]{0.24\textwidth}
+		\labeledfig{tmem_vs_v}{b)}
+		\end{minipage}
+		\begin{minipage}[t]{0.24\textwidth}
+			\labeledfig{xier_vs_p}{c)}
+		\end{minipage}\hfill
+		\begin{minipage}[t]{0.24\textwidth}
+			\labeledfig{xier_vs_p}{d)}
+		\end{minipage}
+		\caption{\label{fig:quantfig} 
+		{\bf a)} $\ler$ against $e^{\b J}$ for different values of $v$. The inset shows the slopes $s$ of linear fits of $\ler$ to $e^{\b J}$ (drawn as dashed black lines), confirming \eqref{ler_scaling}. 
+		{\bf b)} Estimates for $\tmem$ as a function of $v$, obtained with forward flux sampling.  
+		{\bf c)} $\tmem$ plotted against $(\b J)^2$. 
+		{\bf d)} $E(v) / E(0)$. At low enough temperatures, the energy decreases at large enough $v$. 
+	}
+	\end{figure*}
+	
+	\section{Understanding the mechanism}
+	
+	To understand why sliding increases $\tmem$ at large enough $v$, consider what happens to minority domains under this dynamics. A minority domain on only a single chain is eroded ballistically from its endpoints. From the transition rates of Glauber dynamics, the endpoints of a single-chain minority domain contract at velocity 
+	\be \d = (1+e^{-2\b J})\inv.\ee 
+	This is true even when $v=0$. 
+	
+	A minority domain that spans {\it both} chains is more problematic. When $v=0$, its endpoints diffuse. However, when $v>0$, the sliding dynamics attempts to shear the domain, ripping it apart into two spatially-separated single-chain minority domains. The Glauber dynamics attempts to arrest this shearing, and it is easy to check that this succeeds if $v/2 < \d$, in which case the domains on both chains stick together. When $v/2>\d$ however, the domains are sheared apart faster than they try to stick together.\footnote{This produces dynamics that are qualitatively similar to Toom's two-line-voting automaton \cite{toom1995cellular,park1997ergodicity} and the GKL automaton \cite{gacs1978one}, both of which were originally proposed as candidates for one-dimensional memories. This was shown not to be the case in \cite{park1997ergodicity}, which proved that dynamics subjected to $\zt $-symmetry-breaking noise of strength $\ep$ has $\tmem = e^{\ct(\log^2(\ep))}$. It was conjectured in \cite{de1992gacs} that $\tmem = e^{\ct(1/\ep)}$, but our analysis shows that in fact the $e^{\log^2(\ep)}$ scaling holds in this case as well. See \cite{code} for details.}  A visualization of this process is shown in Fig.~\ref{fig:overview}~{\bf b}.
+	
+	How effective is this shearing mechanism? First consider what happens when $v \ra \infty$: here, domains are sheared apart instantly, and a spin on one chain couples to spins on the other chain in a random order. The inter-chain interactions effectively become all-to-all, and the model enters a mean field limit, where it is easy to show the existence of a phase with long range order. In this regime, a system of size $L$ has $\lim_{L \ra\infty}\tmem = \infty$ at low enough $T$, and in fact we only need let $v$ diverge as $\O(\log L)$ for this to be true. 
+	
+	What about at finite $v$? 
+
+	
+
+
+
+	
+	\section{The critical lengthscale} 
+	
+	
+		Let us refer to the spacetime region where spin flips in the metastable region can prevent the $m=-2$ region of the minority domain from eroding as the ``danger region'' $\dr(l)$ (c.f. Fig.~\ref{fig:proof}). Then $\ler$ can be estimated as the size $l$ where getting an error somewhere in $\dr(l)$ becomes likely: 
+	\be \label{ler_cond} e^{-2 \b J}|\dr(\ler)| \sim 1.\ee 
+	$|\dr(l)|$ can be determined from simple geometric considerations (c.f.~fig.~\ref{fig:overview}~{\bf c}) as $|\dr(l)|\approx l^2 \d / (4v(v-\d))$ \cite{code}. From \eqref{ler_cond}, we then have 
+	\be \label{ler_scaling} \ler = c v e^{\b J}, \ee 
+	where $c$ is a constant independent of $v$ to leading order in $\d/v$. 
+	
+	
+	To determine $\tmem$, we thus need to understand the most likely process by which fluctuations produce droplets of size $\ler$. If such droplets had to be created ``all at once'' by rare thermal fluctuations, or had to be built up continuously from a single minority domain that expands from size $1$ to size $\ler$, we would expect $\tmem \sim (e^{4\b J})^\ler$. This estimate is too naive however, as there is a more efficient way of building up minority domains. 
+	
+	To understand this mechanism, consult the schematic of minority domain erosion in Fig.~\ref{fig:proof}. If the correct type of spin flip happens in $\dr$ (in this case, a spin in $\dr$ flipping from $+1$ to $-1$), it can increase the size of the minority domain (c.f. Fig.~\ref{fig:overview}~{\bf d}). Letting $x_{A/C}$ be the spatial coordinates of the points $\bfA,\bfC$ in Fig.~\ref{fig:proof}, the largest amount by which such an event can extend the size of the minority domain is $x_C - x_A$, which one may easily show \cite{code} equals $l\d /2v$. A spin flip event with likelihood $\sim e^{-2\b J}$ can therefore increase the size of the minority domain as $l \ra l(1+\d /2v)$. Since the domain size increases multiplicatively, the number $n_\ler$ of spin flips needed to grow the domain to size $\ler$ is $n_\ler = \ln(\ler) / \ln(1+2\d/v)$. We therefore expect 
+	\be \tmem \gtrsim b(e^{2\b J})^{\ln (\ler) / \ln(1+\d/2v)} \sim be^{2(\b J)^2 / \ln(1+\d /2v)},\ee 
+	for a constant $b>0$. Expanding in $\d /2v \ll 1$ then gives the main result \eqref{main_result}. 
+		
+
+	
+	\section{Confirming the memory time} 
+	
+	We now confirm these predictions in numerics. We start with our prediction for $\ler$, which we estimate as follows. First, we prepare an initial state containing a minority domain of length $l$ in a system of size $L = 5 v l$. We then evolve for a time $l$, and determine whether or not the total number of minority spins has decreased to less than $l$. When then look for the smallest value of $l$ such that the probability $\sfP_{\sf er}(l)$ of this happening is less than $3/4$, thereby defining $\ler$ as 
+	\be \label{numeric_ler} \ler =  \min \{ l \, : \, \sfP_{\sf er}(l) > 3/4 \}.\ee 
+	Fig.~\ref{fig:quantfig}~{\bf a} shows the result of measuring \eqref{numeric_ler} in numerics,  $e^{\b J}$, confirming \eqref{ler_scaling}. 
+	
+	We now confirm the scaling of the memory time in \eqref{main_result}. This is infeasible with direct Monte Carlo updates, but fortunately forward flux sampling \cite{allen2009forward} allows us to get estimates for the memory time even when $\tmem$ is extremely large (for details about the numerics, see \cite{code}). 
+	
+	Fig.~\ref{fig:quantfig}~{\bf b} and {\bf c} show $\tmem$ plotted against $v$ and $(\b J)^2$, respectively. 
+	
+	\section{Frictional cooling} 
+	
+	Let $E(v)$ denote the expected average energy at velocity $v$. 
+	
+	\section{Outlook} 
+	
+	This work has shown that a very simple nonequilibrium drive can dramatically slow down relaxation in a locally-interacting 1d spin chain. 
+	
+	Future work , as well as extending this mechanism to increase the lieftime of {\it quantum} information. 
+	
+	\section{Acknowledgements} 
+	
+	We thank David Limmer, Nathaniel Selub, for discussions. E.L. was supported by a Miller Research Fellowship. All code supporting the numerical analysis in this work is available at \cite{code}. 
+	
+	\bibliography{paper}
+	
+	\appendix 
+	
+\
+\end{document}

@@ -44,6 +44,19 @@ marker_size = 6.5
 cmap = plt.cm.coolwarm_r
 
 
+def _pick_cmap(filenames):
+    """Return plt.cm.rainbow when any file in `filenames` has dynamics='gkl',
+    otherwise the default `cmap` (coolwarm_r). Used so GKL plots get rainbow
+    colors across files while everything else keeps the default coolwarm."""
+    try:
+        for fn in filenames:
+            if load_jld2_data(fn).get('dynamics') == 'gkl':
+                return plt.cm.rainbow
+    except Exception:
+        pass
+    return cmap
+
+
 def load_jld2_data(filename):
     """Load data from a sliding_ising_chain JLD2 file (HDF5 format).
 
@@ -73,20 +86,58 @@ def load_jld2_data(filename):
 
         # Read all scalar params
         for key in ['v', 'L', 'p', 'beta', 'num_trials', 'n_trials',
-                     'T_equil', 'T_sample', 'T_steps', 'M_threshold', 'max_time']:
+                     'T_equil', 'T_sample', 'T_steps', 'M_threshold', 'max_time',
+                     'eta', 'p_noise']:
             val = get_scalar(key)
             if val is not None:
                 data[key] = val
 
+        # Dynamics tag (e.g. 'gkl' from gkl.jl); None for legacy / sliding-Ising files.
+        dyn = get_scalar('dynamics')
+        if isinstance(dyn, bytes):
+            dyn = dyn.decode('utf-8')
+        data['dynamics'] = dyn
+
         # Detect mode from which top-level datasets exist
-        if 'lc_values' in top_keys:
+        if 'v_onset_values' in top_keys:
+            data['mode'] = 'phase_diagram'
+            data['p_values'] = get_array('p_values')
+            data['v_values'] = get_array('v_values')
+            y_mat = get_array('y_matrix')
+            data['y_matrix'] = y_mat.T if y_mat is not None else None  # restore (n_p, n_v) after h5py read
+            data['v_onset_values'] = get_array('v_onset_values')
+            obs = get_scalar('observable')
+            if isinstance(obs, bytes):
+                obs = obs.decode('utf-8')
+            data['observable'] = obs
+            data['onset_threshold'] = get_scalar('onset_threshold')
+        elif 'log_mixing_times' in top_keys:
+            # NOTE: this check must come before the lc_values one — FFS files
+            # now save lc_values too (one per sweep point), so the erosion_test
+            # branch would otherwise swallow them.
+            data['mode'] = 'ffs'
+            data['p_values'] = get_array('p_values')  # None if vary_v
+            data['vs'] = get_array('vs')               # None if vary_p
+            data['mean_mixing_times'] = get_array('mean_mixing_times')
+            data['log_mixing_times'] = get_array('log_mixing_times')
+            data['log_mixing_times_std'] = get_array('log_mixing_times_std')
+            data['n_repeats'] = get_scalar('n_repeats')
+            data['n_configs'] = get_scalar('n_configs')                 # old format
+            data['n_configs_per_run'] = get_scalar('n_configs_per_run') # new format
+            data['per_run_log_taus'] = get_array('per_run_log_taus')    # new format
+        elif 'lc_values' in top_keys:
             data['mode'] = 'erosion_test'
             data['p_values'] = get_array('p_values')  # None if vary_v
             data['vs'] = get_array('vs')               # None if vary_p
             data['lc_values'] = get_array('lc_values')
+            data['lc_stderrs'] = get_array('lc_stderrs')  # None on old files
             data['erode_l_values'] = get_array('erode_l_values')
             data['erode_probs'] = get_array('erode_probs')
             data['thresh_prob'] = get_scalar('thresh_prob')
+            # first-passage escape mode (if present): mirrors erode_* layout
+            data['escape_l_values'] = get_array('escape_l_values')
+            data['escape_probs'] = get_array('escape_probs')
+            data['min_doublons'] = get_scalar('min_doublons')
         elif 'teff_values' in top_keys:
             data['mode'] = 'teff'
             data['T_values'] = get_array('T_values')  # None if vary_v
@@ -107,13 +158,6 @@ def load_jld2_data(filename):
             data['p_values'] = get_array('p_values')  # old format (p sweep)
             data['mean_energies'] = get_array('mean_energies')
             data['mean_heat_flows'] = get_array('mean_heat_flows')
-        elif 'log_mixing_times' in top_keys:
-            data['mode'] = 'ffs'
-            data['p_values'] = get_array('p_values')  # None if vary_v
-            data['vs'] = get_array('vs')               # None if vary_p
-            data['mean_mixing_times'] = get_array('mean_mixing_times')
-            data['log_mixing_times'] = get_array('log_mixing_times')
-            data['log_mixing_times_std'] = get_array('log_mixing_times_std')
         elif 'mean_mixing_times' in top_keys:
             data['mode'] = 'mixing'
             data['p_values'] = get_array('p_values')  # None if vary_v
@@ -122,21 +166,43 @@ def load_jld2_data(filename):
         elif 'magnetization_history' in top_keys:
             data['mode'] = 'history'
             data['magnetization_history'] = get_array('magnetization_history')
+        elif 'D_values' in top_keys:
+            data['mode'] = 'diffusion'
+            data['p_values'] = get_array('p_values')  # None if vary_eta
+            data['vs'] = get_array('vs')               # None if vary_p
+            data['D_values'] = get_array('D_values')
+            data['D_stderrs'] = get_array('D_stderrs')
+            data['init_mag'] = get_scalar('init_mag')
+            data['T_thermalize'] = get_scalar('T_thermalize')
+            data['T_track'] = get_scalar('T_track')
+            data['n_trials'] = get_scalar('n_trials')
+            data['msd_curve_first'] = get_array('msd_curve_first')
+            sm = get_scalar('sweep_mode')
+            if isinstance(sm, bytes):
+                sm = sm.decode('utf-8')
+            data['sweep_mode'] = sm  # 'p', 'tau', 'eta' (None on older files)
         else:
             data['mode'] = 'unknown'
 
     return data
 
 
-def plot_erosion_mode(filenames, raw=False, small_stats=False):
+def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, logy=False):
     """Plot lc vs p or lc vs v, with each file as a separate curve.
-    If erode_vs_l data is present, also plot survival probability vs l."""
+    If erode_vs_l data is present, also plot survival probability vs l.
+    If fit_inset is True, add an inset axes showing the per-file linear-fit
+    slope vs the file's fixed parameter (v when sweeping p, p when sweeping v)."""
     fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    _local_cmap = _pick_cmap(filenames)
+    colors = _local_cmap(np.linspace(0, 1, max(len(filenames), 2)))
 
     xlabel = None
     has_erode_data = False
+    has_escape_data = False
+    slope_records = []  # list of (fixed_param_value, slope, slope_stderr, color, sweep_kind)
+    global_fit_records = []  # used when fit_inset=False: list of dicts per file
+    sweep_kind_global = None
 
     for idx, filename in enumerate(filenames):
         data = load_jld2_data(filename)
@@ -145,64 +211,272 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False):
             continue
 
         lc_values = data['lc_values']
+        lc_stderrs = data.get('lc_stderrs')
+        has_errors = lc_stderrs is not None and np.any(np.isfinite(lc_stderrs))
 
+        is_gkl = data.get('dynamics') == 'gkl'
         if data.get('vs') is not None:
-            # Varying v, fixed p
+            # Varying v (or eta for GKL), fixed p (or p_noise for GKL)
             x_values = data['vs']
-            p = data.get('p', '?')
-            p_label = f'{int(p)}' if isinstance(p, float) and p == int(p) else f'{p}'
-            label = rf'$p={p_label}$'
-            xlabel = r'$v$'
+            if is_gkl:
+                p_noise = data.get('p_noise', '?')
+                p_label = f'{p_noise:.2f}' if isinstance(p_noise, (int, float)) else f'{p_noise}'
+                label = rf'$p={p_label}$'
+                xlabel = r'$\eta$'
+                fixed_param_val = p_noise if isinstance(p_noise, (int, float)) else None
+            else:
+                p = data.get('p', '?')
+                p_label = f'{int(p)}' if isinstance(p, float) and p == int(p) else f'{p}'
+                label = rf'$p={p_label}$'
+                xlabel = r'$v$'
+                fixed_param_val = p if isinstance(p, (int, float)) else None
+            sweep_kind = 'vary_v'
         else:
-            # Varying p, fixed v
+            # Varying p (or p_noise for GKL), fixed v (or eta for GKL)
             x_values = data['p_values']
-            v = data.get('v', '?')
-            v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
-            label = rf'$v={v_label}$'
-            xlabel = r'$e^{\beta J}$'
+            if is_gkl:
+                eta = data.get('eta', '?')
+                eta_label = f'{eta:.2f}' if isinstance(eta, (int, float)) else f'{eta}'
+                label = rf'$\eta={eta_label}$'
+                xlabel = r'$\epsilon$'
+                fixed_param_val = eta if isinstance(eta, (int, float)) else None
+            else:
+                v = data.get('v', '?')
+                v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
+                label = rf'$v={v_label}$'
+                xlabel = r'$p$'
+                fixed_param_val = v if isinstance(v, (int, float)) else None
+            sweep_kind = 'vary_p'
 
-        ax.plot(x_values, lc_values, '-o', color=colors[idx],
-                markerfacecolor=colors[idx], markeredgecolor='k',
-                markersize=marker_size, linewidth=linewidth, alpha=0.7,
-                label=label)
+        # GKL convention: plot against 1/sqrt(p_noise) when sweeping p_noise.
+        # (Leading-order scaling argument predicts xi_er ~ 1/sqrt(ε).)
+        if is_gkl and sweep_kind == 'vary_p':
+            x_values = 1.0 / np.sqrt(np.asarray(x_values, dtype=float))
+            xlabel = r'$1/\sqrt{\epsilon}$'
 
-        # Linear fit to last 3/4 of data points
-        n_fit = max(1, len(x_values) - len(x_values) // 4)
-        x_fit_pts = x_values[-n_fit:]
-        lc_fit_pts = lc_values[-n_fit:]
-        coeffs = np.polyfit(x_fit_pts, lc_fit_pts, 1)
-        slope = coeffs[0]
-        print(f"{label.strip('$')}: slope = {slope:.4f}")
-        x_fit = np.linspace(x_fit_pts.min(), x_fit_pts.max(), 100)
-        lc_fit = np.polyval(coeffs, x_fit)
-        ax.plot(x_fit, lc_fit, '--', color=colors[idx], linewidth=1.5, alpha=0.7)
+        # Filter: only plot/fit data points where the erosion length is >= 5.
+        x_arr = np.asarray(x_values)
+        lc_arr = np.asarray(lc_values)
+        mask = lc_arr >= 5
+
+        if has_errors:
+            err = np.where(np.isfinite(lc_stderrs), lc_stderrs, 0.0)
+            ax.errorbar(x_arr[mask], lc_arr[mask], yerr=err[mask], fmt='o',
+                        color=colors[idx], markerfacecolor=colors[idx],
+                        markeredgecolor='none', markeredgewidth=0,
+                        markersize=0.75 * marker_size,
+                        linewidth=0, alpha=0.7, capsize=3, label=label,
+                        zorder=3)
+        else:
+            ax.plot(x_arr[mask], lc_arr[mask], 'o', color=colors[idx],
+                    markerfacecolor=colors[idx], markeredgecolor='none',
+                    markeredgewidth=0,
+                    markersize=0.75 * marker_size, alpha=0.7, label=label,
+                    zorder=3)
+
+        sweep_kind_global = sweep_kind  # all files share the same sweep kind
+
+        if fit_inset:
+            # Per-file linear fit on points with lc >= 5 (weighted if we have stderrs)
+            x_fit_pts = x_arr[mask]
+            lc_fit_pts = lc_arr[mask]
+            if len(x_fit_pts) < 2:
+                continue
+            slope_stderr = np.nan
+            coeffs = None
+            if has_errors:
+                err_fit_pts = lc_stderrs[mask]
+                valid = np.isfinite(err_fit_pts) & (err_fit_pts > 0)
+                if np.sum(valid) >= 2:
+                    try:
+                        coeffs, cov = np.polyfit(x_fit_pts[valid], lc_fit_pts[valid],
+                                                  1, w=1.0 / err_fit_pts[valid],
+                                                  cov=True)
+                        slope_stderr = float(np.sqrt(cov[0, 0]))
+                    except (ValueError, np.linalg.LinAlgError):
+                        coeffs = None
+            if coeffs is None:
+                coeffs = np.polyfit(x_fit_pts, lc_fit_pts, 1)
+            slope = coeffs[0]
+            print(f"{label.strip('$')}: slope = {slope:.4f}"
+                  + (f" ± {slope_stderr:.4f}" if np.isfinite(slope_stderr) else ""))
+            x_fit = np.linspace(x_fit_pts.min(), x_fit_pts.max(), 100)
+            lc_fit = np.polyval(coeffs, x_fit)
+            ax.plot(x_fit, lc_fit, '--', color='k', linewidth=1.2, alpha=0.85,
+                    zorder=1)
+            if fixed_param_val is not None:
+                slope_records.append((fixed_param_val, slope, slope_stderr,
+                                      colors[idx], sweep_kind))
+        elif not is_gkl:
+            # Collect data for the global two-parameter fit y = s * v * p + b.
+            # Skipped for GKL files — that model doesn't apply.
+            if sweep_kind == 'vary_v':
+                v_arr = x_arr[mask].astype(float)
+                p_arr = np.full_like(v_arr,
+                                      float(fixed_param_val) if fixed_param_val is not None else np.nan)
+            else:  # vary_p
+                p_arr = x_arr[mask].astype(float)
+                v_arr = np.full_like(p_arr,
+                                      float(fixed_param_val) if fixed_param_val is not None else np.nan)
+            err_arr = lc_stderrs[mask] if has_errors else None
+            global_fit_records.append({
+                'v': v_arr,
+                'p': p_arr,
+                'lc': lc_arr[mask].astype(float),
+                'err': err_arr,
+                'x_range': x_arr[mask].astype(float),
+                'color': colors[idx],
+            })
 
         if data.get('erode_l_values') is not None:
             has_erode_data = True
+        if data.get('escape_l_values') is not None:
+            has_escape_data = True
 
-    ax.set_xlabel(xlabel or r'$e^{\beta}$')
-    ax.set_ylabel(r'$\ell_{\sf er}$')
-    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+    ax.set_xlabel(xlabel or r'$p$')
+    ax.set_ylabel(r'$\xi_{\sf er}$')
+    if fit_inset:
+        leg = ax.legend(loc='lower right', frameon=True, fancybox=False,
+                        edgecolor='none', framealpha=0.8)
+        leg.get_frame().set_facecolor('white')
+        leg.get_frame().set_linewidth(0)
+    else:
+        ax.legend(loc='best', frameon=not True, fancybox=False,
+                  edgecolor='black', framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
+
+    if not fit_inset and global_fit_records:
+        # Three-parameter weighted fit of y = s * (v - v0) * p + b across all files.
+        # Linearize as y = s*(v*p) + c*p + b with c = -s*v0; recover v0 = -c/s.
+        v_all = np.concatenate([r['v'] for r in global_fit_records])
+        p_all = np.concatenate([r['p'] for r in global_fit_records])
+        y_all = np.concatenate([r['lc'] for r in global_fit_records])
+        all_have_err = all(r['err'] is not None for r in global_fit_records)
+        X1 = v_all * p_all
+        X2 = p_all
+        X3 = np.ones_like(X1)
+        finite = np.isfinite(X1) & np.isfinite(X2) & np.isfinite(y_all)
+        if all_have_err:
+            err_all = np.concatenate([r['err'] for r in global_fit_records])
+            valid = finite & np.isfinite(err_all) & (err_all > 0)
+            w = 1.0 / err_all[valid] ** 2
+        else:
+            valid = finite
+            w = np.ones(int(np.sum(valid)))
+
+        s_hat = v0_hat = b_hat = s_se = v0_se = b_se = np.nan
+        if int(np.sum(valid)) >= 3:
+            M = np.column_stack([X1[valid], X2[valid], X3[valid]])
+            sw = np.sqrt(w)
+            A = M * sw[:, None]
+            rhs = y_all[valid] * sw
+            try:
+                beta, *_ = np.linalg.lstsq(A, rhs, rcond=None)
+                s_hat = float(beta[0]); c_hat = float(beta[1]); b_hat = float(beta[2])
+                MtWM = M.T @ (w[:, None] * M)
+                cov = np.linalg.inv(MtWM)
+                if not all_have_err:
+                    resid = y_all[valid] - M @ beta
+                    dof = max(1, int(np.sum(valid)) - 3)
+                    cov = cov * float(np.sum(resid ** 2) / dof)
+                s_se = float(np.sqrt(max(cov[0, 0], 0)))
+                b_se = float(np.sqrt(max(cov[2, 2], 0)))
+                if s_hat != 0.0:
+                    v0_hat = -c_hat / s_hat
+                    # delta method: var(v0) with v0 = -c/s
+                    dv_ds = c_hat / s_hat ** 2
+                    dv_dc = -1.0 / s_hat
+                    v0_var = (dv_ds ** 2 * cov[0, 0] + dv_dc ** 2 * cov[1, 1]
+                              + 2 * dv_ds * dv_dc * cov[0, 1])
+                    v0_se = float(np.sqrt(max(v0_var, 0)))
+            except (ValueError, np.linalg.LinAlgError):
+                pass
+
+        print(f"global fit: s = {s_hat:.4f}"
+              + (f" ± {s_se:.4f}" if np.isfinite(s_se) else "")
+              + f", v0 = {v0_hat:.4f}"
+              + (f" ± {v0_se:.4f}" if np.isfinite(v0_se) else "")
+              + f", b = {b_hat:.4f}"
+              + (f" ± {b_se:.4f}" if np.isfinite(b_se) else ""))
+
+        for rec in global_fit_records:
+            xs = rec['x_range']
+            if xs.size == 0 or not (np.isfinite(s_hat) and np.isfinite(v0_hat)
+                                    and np.isfinite(b_hat)):
+                continue
+            x_line = np.linspace(float(xs.min()), float(xs.max()), 100)
+            if sweep_kind_global == 'vary_v':
+                p_fixed = float(rec['p'][0]) if rec['p'].size else np.nan
+                y_line = s_hat * (x_line - v0_hat) * p_fixed + b_hat
+            else:  # vary_p
+                v_fixed = float(rec['v'][0]) if rec['v'].size else np.nan
+                y_line = s_hat * (v_fixed - v0_hat) * x_line + b_hat
+            ax.plot(x_line, y_line, '--', color='k', linewidth=1.2,
+                    alpha=0.85, zorder=1)
+
+        if np.isfinite(s_hat):
+            annot = rf'$s = {s_hat:.2f}$'
+            if np.isfinite(v0_hat):
+                annot += '\n' + rf'$v_0 = {v0_hat:.2f}$'
+            if np.isfinite(b_hat):
+                annot += '\n' + rf'$b = {b_hat:.2f}$'
+            ax.text(0.05, 0.95, annot, transform=ax.transAxes,
+                    ha='left', va='top', fontsize=13)
+
+    if fit_inset and len(slope_records) >= 1:
+        # Sort by the fixed parameter so the inset is a clean line
+        slope_records.sort(key=lambda r: r[0])
+        fxs = np.array([r[0] for r in slope_records])
+        slopes = np.array([r[1] for r in slope_records])
+        kind = slope_records[0][4]
+        inset_xlabel = r'$v$' if kind == 'vary_p' else r'$p$'
+        inset = ax.inset_axes([0.11, 0.66, 0.32, 0.32])
+        inset.minorticks_off()
+        inset.plot(fxs, slopes, '-', color='0.4', linewidth=1, zorder=1)
+        for fx, sl, se, col, _ in slope_records:
+            if np.isfinite(se):
+                inset.errorbar(fx, sl, yerr=se, fmt='o', color=col,
+                               markerfacecolor=col, markeredgecolor='k',
+                               markersize=marker_size * 0.7, capsize=2,
+                               zorder=2)
+            else:
+                inset.plot(fx, sl, 'o', color=col, markerfacecolor=col,
+                           markeredgecolor='k', markersize=marker_size * 0.7,
+                           zorder=2)
+        inset.set_xlabel(inset_xlabel, fontsize=15, labelpad=-6)
+        inset.set_ylabel(r'$s$', fontsize=15, labelpad=-6)
+        inset.tick_params(labelsize=9)
+        inset.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+        inset.set_axisbelow(True)
+
     plt.tight_layout()
     plt.show()
 
-    # If any file has erode_vs_l data, plot P_shrink vs l/lc
-    if has_erode_data:
+    # Per-curve plot: either P_shrink-vs-l/lc (default) or P_escape-vs-l/lc
+    # if any file contains first-passage escape data (auto-detect, replaces y-axis).
+    if has_erode_data or has_escape_data:
         fig2, ax2 = plt.subplots(figsize=(4., 4.), dpi=100)
         ax2.minorticks_off()
 
         for idx, filename in enumerate(filenames):
             data = load_jld2_data(filename)
-            if data['mode'] != 'erosion_test' or data.get('erode_l_values') is None:
+            if data['mode'] != 'erosion_test':
                 continue
-
-            l_matrix = data['erode_l_values'].T    # Julia saves (max_len, n_curves), h5py reads transposed
-            prob_matrix = data['erode_probs'].T
+            # Prefer escape data when available (first-passage mode)
+            use_escape = data.get('escape_l_values') is not None
+            if use_escape:
+                l_matrix = data['escape_l_values'].T
+                prob_matrix = data['escape_probs'].T
+            elif data.get('erode_l_values') is not None:
+                l_matrix = data['erode_l_values'].T
+                prob_matrix = data['erode_probs'].T
+            else:
+                continue
             lc_values = data['lc_values']
             thresh_prob = data.get('thresh_prob', 0.75)
 
+            is_gkl = data.get('dynamics') == 'gkl'
             if data.get('vs') is not None:
                 sweep_values = data['vs']
                 sweep_key = 'v'
@@ -211,7 +485,7 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False):
                 sweep_key = 'p'
 
             n_curves = l_matrix.shape[1] if l_matrix.ndim == 2 else 1
-            curve_colors = cmap(np.linspace(0, 1, max(n_curves, 2)))
+            curve_colors = _pick_cmap(filenames)(np.linspace(0, 1, max(n_curves, 2)))
 
             for i in range(n_curves):
                 if l_matrix.ndim == 2:
@@ -230,7 +504,8 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False):
                 if lc > 0:
                     sweep_val = sweep_values[i] if i < len(sweep_values) else sweep_values[-1]
                     if sweep_key == 'v':
-                        curve_label = rf'$v={sweep_val:.1f}$'
+                        curve_label = (rf'$\eta={sweep_val:.2f}$' if is_gkl
+                                       else rf'$v={sweep_val:.1f}$')
                     else:
                         p_val = sweep_val
                         p_label = f'{int(p_val)}' if isinstance(p_val, float) and p_val == int(p_val) else f'{p_val:.2g}'
@@ -239,23 +514,25 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False):
                     if small_stats:
                         mask = ls <= lc
                         x_plot = (1.0 - ls[mask] / lc)**2
-                        y_plot = 1.0 - ps[mask]
+                        y_plot = (ps[mask] if use_escape else 1.0 - ps[mask])
                         if len(np.unique(ls[mask])) < 2:
                             continue
                     elif raw:
                         x_plot = ls
-                        y_plot = 1.0 - ps
+                        y_plot = ps if use_escape else 1.0 - ps
                     else:
                         x_plot = ls / lc
-                        y_plot = 1.0 - ps
+                        y_plot = ps if use_escape else 1.0 - ps
 
+                    y_plot = np.array(y_plot, dtype=float)
                     y_plot[y_plot <= 0] = np.nan  # avoid log(0)
                     ax2.plot(x_plot, y_plot, '-o', color=curve_colors[i],
                              markerfacecolor=curve_colors[i], markeredgecolor='k',
                              markersize=marker_size, linewidth=linewidth, alpha=0.7,
                              label=curve_label)
 
-            if not small_stats:
+            # Threshold line is only meaningful for the shrink view
+            if not small_stats and not use_escape:
                 ax2.axhline(y=1.0 - thresh_prob, color='red', linestyle='--', linewidth=1.5, alpha=0.7)
 
         if small_stats:
@@ -266,8 +543,10 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False):
         else:
             ax2.axvline(x=1.0, color='gray', linestyle='--', linewidth=1.0, alpha=0.5)
             ax2.set_xlabel(r'$\ell / \ell_c$')
-        ax2.set_ylabel(r'$1-P_{\sf er}(\ell)$')
-        legend_title = r'$e^{\beta J}$' if (small_stats and sweep_key == 'p') else None
+        if logy and not small_stats:
+            ax2.set_yscale('log')
+        ax2.set_ylabel(r'$P_{\sf escape}(\ell)$' if has_escape_data else r'$1-P_{\sf er}(\ell)$')
+        legend_title = r'$p$' if (small_stats and sweep_key == 'p') else None
         ax2.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=legend_title)
         ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax2.set_axisbelow(True)
@@ -312,7 +591,7 @@ def plot_energy_mode(filenames, heat=False):
             else:
                 v_label = f'{v}'
             label = rf'$v={v_label}$'
-            xlabel = r'$e^{\beta J}$'
+            xlabel = r'$p$'
 
         if heat:
             ax.plot(x, y_values, '-o', color=colors[idx],
@@ -330,7 +609,7 @@ def plot_energy_mode(filenames, heat=False):
         ax.set_ylabel(r'$\dot{Q}$')
     else:
         ax.set_ylabel(r'$\langle E \rangle / \langle E_{v=0}\rangle$')
-    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=r'$e^{\beta J}$')
+    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=r'$p$')
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     plt.tight_layout()
@@ -509,6 +788,98 @@ def plot_teff_mode(filenames):
         plt.show()
 
 
+def _add_fit_inset(ax, curve_data, colors, x_transform=None, alpha=None,
+                   xr=False, a_for_inset=None):
+    """For each file, linearly fit log10(tau) vs the *plotted* x-coordinate on
+    the last half of the data, draw the fit as a dashed black line over the
+    fit range, and add an inset plotting the per-file slope s against the
+    file-level fixed parameter (v when sweeping p; e^(beta J) or (beta J)^alpha
+    when sweeping v).
+
+    curve_data: list of (x_values, log10_tau, fixed_param, is_vary_v, idx).
+    x_transform: callable applied to x_values to match the main-plot transform.
+    alpha: if given and we are on a v-sweep, the inset x-axis is (beta J)^alpha
+           rather than e^(beta J).
+    xr: if True and we are on a v-sweep, interpret the fit as
+            t_mem = exp((βJ)^a · v · s)
+        with default exponent a = 2 unless `a_for_inset` overrides it. The
+        inset then plots s = slope_log10 · ln 10 / (βJ)^a against (βJ)^a for
+        the different files.
+    a_for_inset: optional override for the exponent `a` in the τ = exp((βJ)^a·v·s)
+        fit. Only used when xr=True and is_vary_v=True. Defaults to 2 if None.
+    """
+    if len(curve_data) < 1:
+        return
+    if x_transform is None:
+        x_transform = lambda x: x  # noqa: E731
+
+    is_vary_v = curve_data[0][3]
+    params = []
+    slopes = []
+
+    for x_raw, log_tau, fixed_param, _, _ in curve_data:
+        x_t = x_transform(np.asarray(x_raw, dtype=float))
+        log_tau = np.asarray(log_tau, dtype=float)
+        finite = np.isfinite(log_tau) & np.isfinite(x_t)
+        if np.sum(finite) < 2:
+            continue
+        x_fin = x_t[finite]
+        y_fin = log_tau[finite]
+        # Sort by x so "last half" means largest x
+        order = np.argsort(x_fin)
+        x_fin, y_fin = x_fin[order], y_fin[order]
+        n_half = max(2, len(x_fin) // 2)
+        x_fit = x_fin[-n_half:]
+        y_fit = y_fin[-n_half:]
+        slope, intercept = np.polyfit(x_fit, y_fit, 1)
+        params.append(fixed_param)
+        slopes.append(slope)
+        # Draw the fit on the main plot (over the fit range only)
+        x_line = np.linspace(x_fit.min(), x_fit.max(), 100)
+        y_line = 10.0 ** (slope * x_line + intercept)
+        ax.plot(x_line, y_line, '--', color='k', linewidth=1.2, alpha=0.8)
+
+    if len(params) < 1:
+        return
+
+    p_arr = np.array(params, dtype=float)
+    slopes_arr = np.array(slopes, dtype=float)  # d(log10 τ)/dv per file
+    if is_vary_v and xr:
+        # Fit: τ_mem = exp((βJ)^a · v · s)  ⇒  log10(τ) = ((βJ)^a · s / ln 10) · v.
+        # slopes_arr = d(log10 τ)/dv, so s = slope · ln 10 / (βJ)^a. The inset
+        # x-axis is (βJ)^a as well, so a slope-independent (i.e. constant) s
+        # corresponds to a flat horizontal line under the right choice of `a`.
+        a_fit = a_for_inset if a_for_inset is not None else 2.0
+        bj_a = np.abs(np.log(p_arr)) ** a_fit   # |βJ|^a since βJ = −log p > 0
+        inset_x = bj_a
+        slopes_arr = slopes_arr * np.log(10.0) / bj_a
+        # Render the exponent compactly: 2 → "2", 1.5 → "1.5".
+        a_str = f"{a_fit:g}"
+        inset_xlabel = rf'$(\beta J)^{{{a_str}}}$'
+    elif is_vary_v:
+        # Each file has a fixed p; inset x is e^(beta J) = p or (beta J)^alpha.
+        if alpha is not None:
+            inset_x = np.log(p_arr) ** alpha
+            inset_xlabel = rf'$(\beta J)^{{{alpha:g}}}$'
+        else:
+            inset_x = p_arr
+            inset_xlabel = r'$p$'
+    else:
+        inset_x = p_arr  # files distinguished by v
+        inset_xlabel = r'$v$'
+
+    order = np.argsort(inset_x)
+    inset_x = inset_x[order]
+    slopes_arr = slopes_arr[order]
+
+    inset = ax.inset_axes([0.15, 0.55, 0.35, 0.35])
+    inset.plot(inset_x, slopes_arr, 'o-', color='k', markersize=4, linewidth=1.5)
+    inset.set_xlabel(inset_xlabel, fontsize=10)
+    inset.set_ylabel(r'$s$', fontsize=10)
+    inset.tick_params(labelsize=8)
+    inset.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+
+
 def _add_mixing_inset(ax, curve_data, colors):
     """Add inset plot showing exponential fit coefficients, and draw fit lines on main plot.
 
@@ -560,7 +931,7 @@ def _add_mixing_inset(ax, curve_data, colors):
     inset = ax.inset_axes([0.15, 0.55, 0.35, 0.35])
     inset.plot(params, coeffs, 'o-', color='k', markersize=4, linewidth=1.5)
     if is_vary_v:
-        inset.set_xlabel(r'$e^{\beta J}$', fontsize=10)
+        inset.set_xlabel(r'$p$', fontsize=10)
         inset.set_ylabel(r'$c_p$', fontsize=10)
     else:
         inset.set_xlabel(r'$v$', fontsize=10)
@@ -569,8 +940,17 @@ def _add_mixing_inset(ax, curve_data, colors):
     inset.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
 
 
-def plot_mixing_mode(filenames, inset=False):
-    """Plot mixing time vs p, with each file (different v or L) as a separate curve."""
+def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
+    """Plot mixing time vs p, with each file (different v or L) as a separate curve.
+
+    If alpha is given (p-sweeps only), transform x = p to
+    (ln p)**alpha = (beta J)**alpha before plotting; ignored on v-sweeps.
+
+    If fit_inset is True, fit log10(tau) = s * x_plotted + b on the last half
+    of each curve, draw the fits as dashed black lines, and add an inset of
+    s vs the file-level fixed parameter (v on p-sweeps; e^(beta J) or
+    (beta J)^alpha on v-sweeps).
+    """
     fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
     ax.minorticks_off()
     colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
@@ -578,6 +958,10 @@ def plot_mixing_mode(filenames, inset=False):
     xlabel = None
     is_vary_v = None
     curve_data = []
+
+    def _xtransform(x):
+        # Convention p = exp(-β J) ⇒ β J = -log(p). Raise (β J)^α.
+        return (-np.log(x)) ** alpha if alpha is not None else x
 
     for idx, filename in enumerate(filenames):
         data = load_jld2_data(filename)
@@ -588,6 +972,7 @@ def plot_mixing_mode(filenames, inset=False):
         mean_mixing_times = data['mean_mixing_times']
         L = data.get('L', '?')
 
+        is_ising_glauber = data.get('dynamics') == 'ising_glauber'
         if data.get('vs') is not None:
             x_values = data['vs']
             p = data.get('p', '?')
@@ -601,30 +986,45 @@ def plot_mixing_mode(filenames, inset=False):
             curve_data.append((x_values, np.log10(mean_mixing_times), p, True, idx))
         else:
             x_values = data['p_values']
-            v = data.get('v', '?')
             is_vary_v = False
-            if inset:
-                label = rf'${v:.1f}$' if isinstance(v, (int, float)) else rf'${v}$'
+            if is_ising_glauber:
+                label = rf'$L={L}$ (direct)'
+                xlabel = r'$p$'
+                curve_data.append((x_values, np.log10(mean_mixing_times), L, False, idx))
             else:
-                v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
-                label = rf'$v={v_label},\, L={L}$'
-            xlabel = r'$e^{\beta J}$'
-            curve_data.append((x_values, np.log10(mean_mixing_times), v, False, idx))
+                v = data.get('v', '?')
+                if inset:
+                    label = rf'${v:.1f}$' if isinstance(v, (int, float)) else rf'${v}$'
+                else:
+                    v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
+                    label = rf'$v={v_label},\, L={L}$'
+                xlabel = r'$p$'
+                curve_data.append((x_values, np.log10(mean_mixing_times), v, False, idx))
 
-        ax.plot(x_values, mean_mixing_times, '-o', color=colors[idx],
+        x_plot = _xtransform(x_values) if (not is_vary_v) else x_values
+        ax.plot(x_plot, mean_mixing_times, '-o', color=colors[idx],
                 markerfacecolor=colors[idx], markeredgecolor='k',
                 markersize=marker_size, linewidth=linewidth, alpha=0.7,
                 label=label)
 
-    if inset and len(curve_data) > 1:
+    if inset and len(curve_data) > 1 and alpha is None and not fit_inset:
         _add_mixing_inset(ax, curve_data, colors)
+    if fit_inset and len(curve_data) >= 1:
+        _add_fit_inset(ax, curve_data, colors,
+                       x_transform=(_xtransform if (is_vary_v is False) else (lambda x: x)),
+                       alpha=alpha)
 
-    ax.set_xlabel(xlabel or r'$e^{\beta J}$')
+    if alpha is not None and is_vary_v is not None and not is_vary_v:
+        ax.set_xlabel(rf'$(\beta J)^{{{alpha:g}}}$')
+    else:
+        ax.set_xlabel(xlabel or r'$p$')
     ax.set_ylabel(r'$t_{\sf mem}$')
-    ax.set_yscale('log')
+    any_ig_mix = any(load_jld2_data(fn).get('dynamics') == 'ising_glauber' for fn in filenames)
+    if not any_ig_mix:
+        ax.set_yscale('log')
     legend_title = None
     if inset and is_vary_v is not None:
-        legend_title = r'$e^{\beta J}$' if is_vary_v else r'$v$'
+        legend_title = r'$p$' if is_vary_v else r'$v$'
     ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9,
               title=legend_title)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
@@ -633,11 +1033,159 @@ def plot_mixing_mode(filenames, inset=False):
     plt.show()
 
 
-def plot_ffs_mode(filenames, inset=False):
-    """Plot FFS mixing time vs p or v, with exp(L*beta) reference line."""
+def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
+                  fit_inset=False, mixing_overlay=None, anchor_normalize=False,
+                  xlogsqq=False, xq=False, xp=False, xr=False):
+    """Plot FFS mixing time vs p or v, with exp(L*beta) reference line.
+
+    If ploglog is True, plot log10(tau) (rather than tau) on a log y-axis
+    against p on a log x-axis (only meaningful when sweeping p). A per-file
+    linear fit in log-log space gives the exponent a in log(tau) ~ p^a.
+
+    If a_exp is given, transform the x-axis from x to x**a_exp before
+    plotting (a straight line on log-y / linear-x^a means log tau ~ x^a).
+    Ignored when ploglog is True.
+
+    If mixing_overlay is a list of mixing-mode JLD2 filenames, each is loaded
+    and rendered as scatter points on top of the FFS curves (no fit lines,
+    no errorbars). Used for the ising.jl FFS-vs-direct benchmark.
+
+    If alpha is given (p-sweeps only), transform x = p to
+    (ln p)**alpha = (beta J)**alpha. A straight line on log-y then means
+    log tau ~ (beta J)^alpha. Takes precedence over --a; ignored when
+    sweeping v or when ploglog is True.
+    """
+    if a_exp is not None and ploglog:
+        print("Warning: --a and --ploglog are mutually exclusive; ignoring --a.")
+        a_exp = None
+    if alpha is not None and ploglog:
+        print("Warning: --alpha and --ploglog are mutually exclusive; ignoring --alpha.")
+        alpha = None
+    if alpha is not None and a_exp is not None:
+        print("Warning: --alpha takes precedence over --a; ignoring --a.")
+        a_exp = None
+
+    # --xlogsqq / --xq / --xp / --xr are mutually exclusive shorthand transforms.
+    # Precedence: xlogsqq > xq > xp > xr; warn and drop the losers. (xlogsqq/xq/xp
+    # carry GKL-flavored labels using ε; xr carries the sliding-Ising label
+    # (β J)^2 for the same (−log p)^2 transform.)
+    if sum(bool(x) for x in (xlogsqq, xq, xp, xr)) > 1:
+        print("Warning: --xlogsqq, --xq, --xp, --xr are mutually exclusive; "
+              "using the first set in (xlogsqq, xq, xp, xr).")
+        if xlogsqq:
+            xq = xp = xr = False
+        elif xq:
+            xp = xr = False
+        elif xp:
+            xr = False
+    _new_xform = xlogsqq or xq or xp or xr
+    if _new_xform and ploglog:
+        print("Warning: --xlogsqq/--xq/--xp/--xr are ignored with --ploglog.")
+        xlogsqq = xq = xp = xr = False
+        _new_xform = False
+    # Capture --a for the fit-inset exponent before the precedence rule nulls
+    # it. Under --xr + --fit_inset, --a overrides the default fit-inset
+    # exponent (2) so the fit form becomes τ = exp((βJ)^a · v · s) instead of
+    # exp((βJ)^2 · v · s). For --a in any other combo, the standard precedence
+    # warning applies (--a is ignored for the main-plot x-transform).
+    a_for_inset = a_exp if (xr and fit_inset and a_exp is not None) else None
+    if _new_xform and (alpha is not None or a_exp is not None):
+        if a_for_inset is not None and alpha is None:
+            print(f"Note: --xr controls the main-plot x-axis; --a={a_exp:g} is "
+                  "used as the fit-inset exponent in τ = exp((βJ)^a · v · s).")
+        else:
+            print("Warning: --xlogsqq/--xq/--xp/--xr take precedence over --alpha/--a.")
+        alpha = None
+        a_exp = None
+
+    def _xtransform(x):
+        # Convention p = exp(-β J) ⇒ β J = -log(p). Raise (β J)^α.
+        if xlogsqq:
+            return (-np.log(x)) ** 2
+        if xq:
+            return 1.0 / np.asarray(x, dtype=float)
+        if xp:
+            return x
+        if xr:
+            return (-np.log(x)) ** 2
+        if alpha is not None:
+            return (-np.log(x)) ** alpha
+        if a_exp is not None:
+            return x ** a_exp
+        return x
+
+    # Print a one-line summary of how many independent FFS runs went into each
+    # file's mixing-time estimates.
+    print("FFS run counts per file:")
+    for fn in filenames:
+        d = load_jld2_data(fn)
+        if d['mode'] != 'ffs':
+            continue
+        nreq = d.get('n_repeats')
+        ncpr = d.get('n_configs_per_run')
+        ncfg = d.get('n_configs')
+        prl = d.get('per_run_log_taus')
+        budget = (f"n_configs_per_run={int(ncpr)}" if ncpr is not None
+                  else f"n_configs={int(ncfg)} (legacy total)" if ncfg is not None
+                  else "n_configs=?")
+        nreq_str = f"n_repeats={int(nreq)}" if nreq is not None else "n_repeats=?"
+        if prl is not None and prl.ndim >= 1:
+            # per_run_log_taus is saved per sweep point; count finite entries
+            arr = np.asarray(prl, dtype=float)
+            # may be (n_repeats, n_sweep) after h5py read of julia (n_sweep, n_repeats);
+            # axis with size n_repeats is the smaller of the two
+            n_ok = np.isfinite(arr).sum(axis=int(np.argmin(arr.shape)))
+            n_ok_str = f", n_ok={list(map(int, n_ok))}"
+        else:
+            n_ok_str = ""
+        print(f"  {fn}: {nreq_str}, {budget}{n_ok_str}")
+
     fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    # When any file in the set is a v-sweep, use Oranges (sliced away from the
+    # pale low and saturated high ends so the lightest curve is still visible
+    # on a white background). Otherwise keep the GKL/coolwarm default.
+    _any_vary_v = any(load_jld2_data(fn).get('vs') is not None for fn in filenames)
+    if _any_vary_v:
+        colors = plt.cm.Oranges(np.linspace(0.35, 0.95, max(len(filenames), 2)))
+    else:
+        colors = _pick_cmap(filenames)(np.linspace(0, 1, max(len(filenames), 2)))
+
+    # Per-FFS-file multiplicative rescale so that the FFS τ at the smallest x
+    # value matches the direct (mixing-overlay) τ at the same x. Only takes
+    # effect when --anchor_normalize is set AND a mixing overlay is present.
+    anchor_scale = {}
+    if anchor_normalize and mixing_overlay:
+        direct_xs, direct_ys = None, None
+        for fn in mixing_overlay:
+            d = load_jld2_data(fn)
+            if d['mode'] != 'mixing':
+                continue
+            direct_xs = np.asarray(d.get('p_values') if d.get('vs') is None else d['vs'], dtype=float)
+            direct_ys = np.asarray(d['mean_mixing_times'], dtype=float)
+            break  # use first mixing file as the reference
+        if direct_xs is None:
+            print("Warning: --anchor_normalize requested but no mixing overlay file found; "
+                  "FFS curves left unscaled.")
+        else:
+            for fn in filenames:
+                d = load_jld2_data(fn)
+                if d['mode'] != 'ffs':
+                    continue
+                xs = np.asarray(d.get('p_values') if d.get('vs') is None else d['vs'], dtype=float)
+                ys = np.asarray(d['mean_mixing_times'], dtype=float)
+                valid = np.isfinite(ys) & (ys > 0)
+                if not np.any(valid):
+                    continue
+                i_anchor = np.where(valid)[0][np.argmin(xs[valid])]
+                x_anchor = xs[i_anchor]
+                ffs_at_anchor = ys[i_anchor]
+                j_match = int(np.argmin(np.abs(direct_xs - x_anchor)))
+                direct_at_anchor = direct_ys[j_match]
+                if np.isfinite(direct_at_anchor) and direct_at_anchor > 0 and ffs_at_anchor > 0:
+                    anchor_scale[fn] = direct_at_anchor / ffs_at_anchor
+                    print(f"  anchor: {fn}: scale = {anchor_scale[fn]:.4g} "
+                          f"(FFS={ffs_at_anchor:.3g}, direct={direct_at_anchor:.3g} at x={x_anchor:.3g})")
 
     max_mixing_time = 0
     ref_lines = []
@@ -655,88 +1203,343 @@ def plot_ffs_mode(filenames, inset=False):
         L = data.get('L', '?')
         log_tau = data.get('log_mixing_times')
 
+        # Apply anchor normalization (multiplicative scale)
+        _scale = anchor_scale.get(filename)
+        if _scale is not None:
+            mean_mixing_times = np.asarray(mean_mixing_times, dtype=float) * _scale
+            if log_tau is not None:
+                log_tau = np.asarray(log_tau, dtype=float) + np.log10(_scale)
+
+        is_gkl = data.get('dynamics') == 'gkl'
+        is_ising_glauber = data.get('dynamics') == 'ising_glauber'
+        _ms = marker_size * (0.75 if is_gkl else 1.0)
         if data.get('vs') is not None:
             x_values = data['vs']
-            p = data.get('p', '?')
             is_vary_v = True
-            if isinstance(p, (int, float)):
-                label = rf'${p:.2f}$'
+            if is_gkl:
+                fixed = data.get('p_noise', '?')
+                label = rf'${fixed:.3f}$' if isinstance(fixed, (int, float)) else rf'${fixed}$'
+                xlabel = r'$\eta$'
             else:
-                label = rf'${p}$'
-            xlabel = r'$v$'
+                fixed = data.get('p', '?')
+                # With --xr, label each curve by its value of r = (βJ)² instead
+                # of by raw p (the sliding-Ising temperature variable the user
+                # actually controlled the sweep with).
+                if xr and isinstance(fixed, (int, float)) and fixed > 0:
+                    r_val = (-np.log(fixed)) ** 2
+                    label = rf'${r_val:.2f}$'
+                else:
+                    label = rf'${fixed:.2f}$' if isinstance(fixed, (int, float)) else rf'${fixed}$'
+                xlabel = r'$v$'
             log_tau_arr = log_tau if log_tau is not None else np.log10(mean_mixing_times)
-            curve_data.append((x_values, log_tau_arr, p, True, idx))
+            curve_data.append((x_values, log_tau_arr, fixed, True, idx))
         else:
-            x_values = data['p_values'] **.5 
+            x_values = data['p_values'] #**.5
             # ax.set_xscale('log')
-            v = data.get('v', '?')
             is_vary_v = False
-            if inset:
-                label = rf'${v:.1f}$' if isinstance(v, (int, float)) else rf'${v}$'
+            if is_ising_glauber:
+                # No "fixed" param when sweeping p (h is the only other knob).
+                fixed = data.get('L', '?')
+                label = (rf'$L={fixed}$' if isinstance(fixed, (int, float))
+                         else rf'${fixed}$')
+                xlabel = r'$p$'
+            elif is_gkl:
+                fixed = data.get('eta', '?')
+                label = (rf'${fixed:.1f}$' if isinstance(fixed, (int, float))
+                         else rf'${fixed}$')
+                xlabel = r'$\epsilon$'
             else:
-                v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
-                label = rf'$v={v_label},\, L={L}$'
-            xlabel = r'$e^{\beta J}$'
-            if isinstance(L, (int, float)) and L > 0:
-                ref_lines.append((L, x_values))
+                fixed = data.get('v', '?')
+                label = (rf'${fixed:.1f}$' if isinstance(fixed, (int, float))
+                         else rf'${fixed}$')
+                xlabel = r'$p$'
+                if isinstance(L, (int, float)) and L > 0:
+                    ref_lines.append((L, x_values))
             log_tau_arr = log_tau if log_tau is not None else np.log10(mean_mixing_times)
-            curve_data.append((x_values, log_tau_arr, v, False, idx))
+            curve_data.append((x_values, log_tau_arr, fixed, False, idx))
+
+        # Append anchor-scale annotation to the curve label, if any
+        if _scale is not None:
+            label = label + rf' ($\times{_scale:.2g}$)'
 
         # Filter out Inf/NaN values for plotting
         log_tau = data.get('log_mixing_times')
+        if _scale is not None and log_tau is not None:
+            log_tau = np.asarray(log_tau, dtype=float) + np.log10(_scale)
         log_tau_std = data.get('log_mixing_times_std')
         finite_mask = np.isfinite(mean_mixing_times)
 
+        if ploglog:
+            if is_vary_v:
+                print(f"Warning: {filename} is a v-sweep; --ploglog only makes "
+                      f"sense for p-sweeps, skipping fit.")
+            y_vals = log_tau if log_tau is not None else np.log10(mean_mixing_times)
+            has_std = (log_tau_std is not None
+                       and np.any(np.isfinite(log_tau_std)))
+            mask = finite_mask & (y_vals > 0)
+            if has_std:
+                mask = mask & np.isfinite(log_tau_std)
+                yerr = log_tau_std[mask]
+            else:
+                yerr = None
+
+            # Per-file power-law fit: log10(log_tau) = a * log10(p) + c.
+            a_fit = np.nan
+            if (not is_vary_v) and np.sum(mask) >= 2:
+                lx = np.log10(x_values[mask])
+                ly = np.log10(y_vals[mask])
+                if has_std and yerr is not None:
+                    # Propagate std on log_tau to std on log10(log_tau):
+                    # d(log10(z))/dz = 1/(z ln 10), so sigma' = sigma/(z ln 10).
+                    sig = yerr / (y_vals[mask] * np.log(10.0))
+                    valid = np.isfinite(sig) & (sig > 0)
+                    if np.sum(valid) >= 2:
+                        coeffs = np.polyfit(lx[valid], ly[valid], 1,
+                                             w=1.0 / sig[valid])
+                    else:
+                        coeffs = np.polyfit(lx, ly, 1)
+                else:
+                    coeffs = np.polyfit(lx, ly, 1)
+                a_fit, c_fit = float(coeffs[0]), float(coeffs[1])
+                print(f"{filename}: log10(log10 tau) ~ {a_fit:.3f} log10(p) "
+                      f"+ {c_fit:.3f}  =>  log tau ~ p^{a_fit:.3f}")
+                # Draw fit line on main plot
+                x_line = np.linspace(x_values[mask].min(),
+                                     x_values[mask].max(), 100)
+                y_line = 10.0 ** (a_fit * np.log10(x_line) + c_fit)
+                ax.plot(x_line, y_line, '--', color=colors[idx],
+                        linewidth=1.2, alpha=0.85, zorder=1)
+                # Append exponent to legend label
+                label = rf'{label}, $a={a_fit:.2f}$'
+
+            if has_std:
+                ax.errorbar(x_values[mask], y_vals[mask], yerr=yerr,
+                            fmt='-o', color=colors[idx],
+                            markerfacecolor=colors[idx], markeredgecolor='k',
+                            markersize=_ms, linewidth=linewidth,
+                            alpha=0.7, capsize=3, label=label)
+            else:
+                ax.plot(x_values[mask], y_vals[mask], '-o', color=colors[idx],
+                        markerfacecolor=colors[idx], markeredgecolor='k',
+                        markersize=_ms, linewidth=linewidth,
+                        alpha=0.7, label=label)
+            if np.any(mask):
+                max_mixing_time = max(max_mixing_time, float(np.max(y_vals[mask])))
+            continue
+
+        x_plot = _xtransform(x_values) if (not is_vary_v) else x_values
         if log_tau is not None and log_tau_std is not None and np.any(np.isfinite(log_tau_std)):
             tau_upper = 10.0 ** (log_tau + log_tau_std)
             tau_lower = 10.0 ** (log_tau - log_tau_std)
             mask = finite_mask & np.isfinite(log_tau_std)
-            ax.errorbar(x_values[mask], mean_mixing_times[mask],
+            ax.errorbar(x_plot[mask], mean_mixing_times[mask],
                         yerr=[mean_mixing_times[mask] - tau_lower[mask],
                               tau_upper[mask] - mean_mixing_times[mask]],
                         fmt='-o', color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=marker_size, linewidth=linewidth, alpha=0.7,
+                        markersize=_ms, linewidth=linewidth, alpha=0.7,
                         capsize=3, label=label)
         else:
-            ax.plot(x_values[finite_mask], mean_mixing_times[finite_mask], '-o', color=colors[idx],
+            ax.plot(x_plot[finite_mask], mean_mixing_times[finite_mask], '-o', color=colors[idx],
                     markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=marker_size, linewidth=linewidth, alpha=0.7,
+                    markersize=_ms, linewidth=linewidth, alpha=0.7,
                     label=label)
 
         if np.any(finite_mask):
             max_mixing_time = max(max_mixing_time, np.max(mean_mixing_times[finite_mask]))
 
-    # Draw exp(L * beta) = p^L reference curve (only when sweeping p)
-    for i, (L, p_values) in enumerate(ref_lines):
-        ref_values = p_values ** L
-        if max_mixing_time > np.min(ref_values):
-            ax.plot(p_values, ref_values, ':', color='red', linewidth=1.5,
-                    label=rf'$e^{{L \beta}}$' if i == 0 else None)
+    # Draw exp(L β) reference curve (sweeping p, not ploglog).
+    # Convention p = exp(-β J) ⇒ exp(L β) = p^(-L).
+    if not ploglog:
+        for i, (L, p_values) in enumerate(ref_lines):
+            ref_values = p_values ** (-L)
+            if max_mixing_time > np.min(ref_values):
+                x_ref = _xtransform(p_values)
+                ax.plot(x_ref, ref_values, ':', color='red', linewidth=1.5,
+                        label=rf'$e^{{L \beta}}$' if i == 0 else None)
 
-    if inset and len(curve_data) > 1:
+    if inset and len(curve_data) > 1 and not ploglog and a_exp is None and alpha is None and not fit_inset:
         _add_mixing_inset(ax, curve_data, colors)
+    if fit_inset and not ploglog and len(curve_data) >= 1:
+        _add_fit_inset(ax, curve_data, colors,
+                       x_transform=(_xtransform if (is_vary_v is False) else (lambda x: x)),
+                       alpha=alpha, xr=xr, a_for_inset=a_for_inset)
 
-    ax.set_xlabel(xlabel or r'$e^{\beta J}$')
-    ax.set_ylabel(r'$t_{\sf mem}$')
-    ax.set_yscale('log')
+    # Mixing-mode overlay (direct-trajectory benchmark): scatter, no fit.
+    if mixing_overlay:
+        overlay_colors = plt.cm.viridis(np.linspace(0.15, 0.85, max(len(mixing_overlay), 2)))
+        for j, fn in enumerate(mixing_overlay):
+            d = load_jld2_data(fn)
+            if d['mode'] != 'mixing':
+                continue
+            mm = np.asarray(d['mean_mixing_times'], dtype=float)
+            xs = np.asarray(d.get('p_values') if d.get('vs') is None else d['vs'], dtype=float)
+            xs_plot = _xtransform(xs) if (a_exp is None or ploglog) else xs ** a_exp
+            mm_plot = np.log10(mm) if ploglog else mm
+            L_overlay = d.get('L', '?')
+            mthr = d.get('M_threshold', '?')
+            mthr_str = f'{mthr:.2f}' if isinstance(mthr, (int, float)) else str(mthr)
+            lbl = rf'direct, $L={L_overlay}$, $M_{{\rm th}}={mthr_str}$'
+            ax.scatter(xs_plot, mm_plot, marker='x', s=70, color=overlay_colors[j],
+                       zorder=5, label=lbl, linewidth=2)
+            # Errorbars from SoM if present
+            sd = d.get('mixing_time_stds')
+            if sd is not None:
+                sd = np.asarray(sd, dtype=float)
+                if ploglog:
+                    yerr = sd / (mm * np.log(10.0))
+                    ax.errorbar(xs_plot, mm_plot, yerr=yerr, fmt='none',
+                                ecolor=overlay_colors[j], capsize=3, zorder=5)
+                else:
+                    ax.errorbar(xs_plot, mm_plot, yerr=sd, fmt='none',
+                                ecolor=overlay_colors[j], capsize=3, zorder=5)
+
+    base_xlabel = xlabel or r'$p$'
+    _xsym = base_xlabel.strip('$')  # '\epsilon' or 'p' (whatever the base symbol is)
+    if (xlogsqq or xq or xp or xr) and not is_vary_v:
+        if xlogsqq:
+            ax.set_xlabel(rf'$(\log(1/{_xsym}))^2$')
+        elif xq:
+            ax.set_xlabel(rf'$1/{_xsym}$')
+        elif xr:
+            ax.set_xlabel(r'$(\beta J)^2$')
+        else:  # xp
+            ax.set_xlabel(base_xlabel)
+    elif alpha is not None and not is_vary_v:
+        ax.set_xlabel(rf'$(\beta J)^{{{alpha:g}}}$')
+    elif a_exp is not None:
+        # Wrap the base xlabel in parentheses and raise to a_exp.
+        ax.set_xlabel(rf'$({base_xlabel.strip("$")})^{{{a_exp:g}}}$')
+    else:
+        ax.set_xlabel(base_xlabel)
+    dynamics_set = set(load_jld2_data(fn).get('dynamics') for fn in filenames)
+    if mixing_overlay:
+        dynamics_set |= set(load_jld2_data(fn).get('dynamics') for fn in mixing_overlay)
+    any_gkl = 'gkl' in dynamics_set
+    any_ig = 'ising_glauber' in dynamics_set
+    if ploglog:
+        ax.set_ylabel(r'$\log_{10} t_{\sf mem}$')
+        ax.set_xscale('log')
+    else:
+        ax.set_ylabel(r'$t_{\sf mem}$')
+    if not any_ig:
+        ax.set_yscale('log')
     legend_title = None
     if is_vary_v:
-        legend_title = r'$e^{\beta J}$'
-    elif inset and is_vary_v is not None:
-        legend_title = r'$v$'
+        # --xr reparametrises the fixed temperature variable for non-GKL curves
+        # as r = (βJ)², matching the per-curve relabelling above.
+        if xr and not any_gkl:
+            legend_title = r'$(\beta J)^2$'
+        else:
+            legend_title = r'$\epsilon$' if any_gkl else r'$p$'
+    elif is_vary_v is not None and not is_vary_v:
+        if any_ig:
+            legend_title = None  # L is in each label; no shared title
+        elif any_gkl:
+            legend_title = r'$\eta$'
+        else:
+            legend_title = r'$v$'
     leg = ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9,
                     title=legend_title)
     if leg.get_title():
         leg.get_title().set_fontsize(13 * 1.2)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
+    # v-sweep: force a major tick at every integer v in the visible range so
+    # half-integer sweeps don't display only at half-integer ticks (matplotlib
+    # otherwise places them at multiples of 0.5 for evenly-spaced 0.5-step
+    # sweeps). Don't touch other modes — base_xlabel != $v$ means we're against
+    # p, ε, (βJ)², etc., where integer-only ticks would look wrong.
+    if is_vary_v:
+        try:
+            xmin, xmax = ax.get_xlim()
+            lo = int(np.ceil(xmin - 1e-9))
+            hi = int(np.floor(xmax + 1e-9))
+            if hi >= lo:
+                ax.set_xticks(list(range(lo, hi + 1)))
+        except Exception:
+            pass
     plt.tight_layout()
     plt.show()
 
 
-def plot_history_mode(filenames):
-    """Plot spacetime magnetization heatmap from a single file."""
+def plot_diffusion_mode(filenames):
+    """Plot the GKL domain-wall diffusion constant D vs the swept parameter.
+
+    Axis labels:
+      - Sweep was in p_noise (sweep_mode='p' or unspecified, p-sweep file):
+          x = p_noise (= ε),         labels y = D(ε),  x = ε
+      - Sweep was in τ = 1/√p (sweep_mode='tau'):
+          x = 1/√(p_noise) = 1/√ε,   labels y = D(ε),  x = 1/√ε
+      - Sweep was in η (vary_eta=true):
+          x = η,                     labels y = D(η),  x = η
+
+    One curve per input file (typically different L or η).
+    """
+    fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    ax.minorticks_off()
+    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+
+    xlabel = None
+    ylabel = r'$D(\epsilon)$'
+    for idx, filename in enumerate(filenames):
+        data = load_jld2_data(filename)
+        if data['mode'] != 'diffusion':
+            print(f"Warning: {filename} is not diffusion mode, skipping...")
+            continue
+
+        D = np.asarray(data['D_values'], dtype=float)
+        D_err = np.asarray(data['D_stderrs'], dtype=float)
+        L = data.get('L', '?')
+        sweep_mode = data.get('sweep_mode')
+
+        if data.get('vs') is not None:
+            # η-sweep
+            x = np.asarray(data['vs'], dtype=float)
+            xlabel = r'$\eta$'
+            ylabel = r'$D(\eta)$'
+            p_fixed = data.get('p_noise', data.get('p', '?'))
+            p_lab = f'{p_fixed:.3f}' if isinstance(p_fixed, (int, float)) else f'{p_fixed}'
+            label = rf'$p={p_lab},\, L={L}$'
+        else:
+            p = np.asarray(data['p_values'], dtype=float)
+            if sweep_mode == 'tau':
+                # Plot on the 1/√ε axis (= τ).
+                x = 1.0 / np.sqrt(p)
+                xlabel = r'$1/\sqrt{\epsilon}$'
+            else:
+                # Default / sweep_mode='p': plot against ε directly.
+                x = p
+                xlabel = r'$\epsilon$'
+            ylabel = r'$D(\epsilon)$'
+            eta = data.get('eta', '?')
+            eta_lab = f'{eta:.3f}' if isinstance(eta, (int, float)) else f'{eta}'
+            label = rf'$\eta={eta_lab},\, L={L}$'
+
+        finite = np.isfinite(D) & (D > 0)
+        if not np.any(finite):
+            print(f"Warning: {filename} has no finite positive D values.")
+            continue
+        ax.errorbar(x[finite], D[finite], yerr=D_err[finite], fmt='-o',
+                    color=colors[idx], markerfacecolor=colors[idx],
+                    markeredgecolor='k', markersize=marker_size,
+                    linewidth=linewidth, alpha=0.7, capsize=3, label=label)
+
+    ax.set_xlabel(xlabel or r'$\epsilon$')
+    ax.set_ylabel(ylabel)
+    ax.set_yscale('log')
+    ax.legend(loc='best', frameon=not True, fancybox=False,
+              edgecolor='black', framealpha=0.9)
+    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_history_mode(filenames, t_max=None, hide_ticks=False):
+    """Plot spacetime magnetization heatmap from a single file. t_max optionally
+    truncates the time axis to [0, t_max]. hide_ticks removes axis ticks and
+    tick labels."""
     for filename in filenames:
         data = load_jld2_data(filename)
         if data['mode'] != 'history':
@@ -744,6 +1547,9 @@ def plot_history_mode(filenames):
             continue
 
         mag = data['magnetization_history']
+        if t_max is not None:
+            t_cut = min(int(t_max) + 1, mag.shape[1])
+            mag = mag[:, :t_cut]
         v = data.get('v', 0)
         L = data.get('L', mag.shape[0])
         beta_val = data.get('beta', '?')
@@ -755,32 +1561,246 @@ def plot_history_mode(filenames):
             shift = int(round(v * t / 2)) % L
             mag_shifted[:, t] = np.roll(mag[:, t], -shift)
 
+        # Discrete 3-color colormap (values are -2, 0, +2).
+        rdbu = plt.cm.RdBu
+        m_cmap = matplotlib.colors.ListedColormap(
+            [rdbu(0.15), rdbu(0.5), rdbu(0.85)]
+        )
+        m_norm = matplotlib.colors.BoundaryNorm([-3, -1, 1, 3], m_cmap.N)
+
         fig, ax = plt.subplots(figsize=(3., 6.), dpi=100)
-        im = ax.imshow(mag_shifted.T, aspect='auto', origin='lower', cmap='RdBu',
-                       vmin=-2, vmax=2)
-        ax.set_xlabel(r'Site')
+        im = ax.imshow(mag_shifted.T, aspect='auto', origin='lower',
+                       cmap=m_cmap, norm=m_norm, alpha=0.6)
+        ax.set_xlabel(r'$x$')
         ax.set_ylabel(r'$t$')
-        fig.colorbar(im, ax=ax, shrink=0.8)
+        mathsf_fmt = matplotlib.ticker.FuncFormatter(
+            lambda val, _pos: rf'$\mathsf{{{val:g}}}$'
+        )
+        if hide_ticks:
+            ax.set_xticks([])
+            ax.set_yticks([])
+        else:
+            ax.minorticks_off()
+            # Exactly 5 evenly-spaced x-ticks from 0 to the system size L.
+            L_int = int(L) if isinstance(L, (int, float)) else mag.shape[0]
+            ax.set_xticks(np.linspace(0, L_int, 5))
+            ax.set_xlim(-0.5, L_int)
+            # y-ticks every 25 time units (e.g. 0, 25, 50, ..., max).
+            y_top = mag.shape[1] - 1
+            ax.set_yticks(list(range(0, int(y_top) + 1, 25)))
+            ax.xaxis.set_major_formatter(mathsf_fmt)
+            ax.yaxis.set_major_formatter(mathsf_fmt)
+        # Inset colorbar in the upper-right of the plot.
+        cax = ax.inset_axes([0.76, 0.69, 0.06, 0.28])
+        cbar = fig.colorbar(im, cax=cax, ticks=[-2, 0, 2])
+        cbar.set_label(r'$m$', labelpad=-4)
+        cbar.ax.tick_params(labelsize=10)
+        cbar.ax.yaxis.set_major_formatter(mathsf_fmt)
+        cbar.ax.minorticks_off()
         plt.tight_layout()
         plt.show()
+
+
+def plot_phase_diagram_mode(filenames, raw=False, pmin=None, pmax=None,
+                            vmin=None, vmax=None):
+    """Plot v* vs p (one curve per file). With raw=True, plot the inner-sweep
+    curves (observable vs v) for each p in the first file. pmin/pmax/vmin/vmax
+    override the axis limits when provided."""
+    if raw:
+        data = load_jld2_data(filenames[0])
+        if data['mode'] != 'phase_diagram':
+            print(f"Warning: {filenames[0]} is not phase_diagram mode")
+            return
+        p_values = data['p_values']
+        v_values = data['v_values']
+        y_matrix = data['y_matrix']
+        v_onset = data['v_onset_values']
+        observable = data.get('observable', 'mixing')
+
+        _, ax = plt.subplots(figsize=(5., 4.), dpi=100)
+        colors = cmap(np.linspace(0, 1, max(len(p_values), 2)))
+        ylab = r'$t_{\sf mem}$' if observable == 'mixing' else r'$\ell_c$'
+        for i, p in enumerate(p_values):
+            ax.plot(v_values, y_matrix[i, :], '-o', color=colors[i],
+                    markerfacecolor=colors[i], markeredgecolor='k',
+                    markersize=marker_size, linewidth=linewidth, alpha=0.7,
+                    label=rf'${p:.2f}$')
+            if np.isfinite(v_onset[i]):
+                ax.axvline(v_onset[i], color=colors[i], linestyle='--', linewidth=1, alpha=0.5)
+        ax.set_xlabel(r'$v$')
+        ax.set_ylabel(ylab)
+        if observable == 'mixing':
+            ax.set_yscale('log')
+        leg = ax.legend(loc='best', frameon=False, title=r'$p$')
+        if leg.get_title():
+            leg.get_title().set_fontsize(13 * 1.2)
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+        ax.set_axisbelow(True)
+        plt.tight_layout()
+        plt.show()
+        return
+
+    _, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    ax.minorticks_off()
+
+    curves = []  # collected (p_filt, v_filt) for post-loop shading
+    v_data_max = -np.inf
+    p_data_min = np.inf
+    p_data_max = -np.inf
+    for filename in filenames:
+        data = load_jld2_data(filename)
+        if data['mode'] != 'phase_diagram':
+            print(f"Warning: {filename} is not phase_diagram mode, skipping...")
+            continue
+        p_values = data['p_values']
+        v_onset = data['v_onset_values']
+        v_values = data.get('v_values')
+        mask = np.isfinite(v_onset)
+        p_filt = p_values[mask]
+        v_filt = v_onset[mask]
+        curves.append((p_filt, v_filt))
+        if v_values is not None:
+            v_data_max = max(v_data_max, float(np.max(v_values)))
+        if len(p_values) > 0:
+            p_data_min = min(p_data_min, float(np.min(p_values)))
+            p_data_max = max(p_data_max, float(np.max(p_values)))
+
+    # Shade the region above each curve (larger v than v*(p)), then draw
+    # scatter points on top.
+    if vmax is not None:
+        y_top = vmax
+    elif np.isfinite(v_data_max):
+        y_top = v_data_max
+    else:
+        y_top = ax.get_ylim()[1]
+    for p_filt, v_filt in curves:
+        if len(p_filt) >= 2:
+            ax.fill_between(p_filt, v_filt, y_top, color='lightblue',
+                            alpha=0.55, linewidth=0)
+    dot_color = '#ff8a8a'  # light red
+    for p_filt, v_filt in curves:
+        ax.plot(p_filt, v_filt, 'o', color=dot_color,
+                markerfacecolor=dot_color, markeredgecolor='k',
+                markersize=0.75 * marker_size, zorder=3)
+
+    if pmin is not None or pmax is not None:
+        ax.set_xlim(left=pmin, right=pmax)
+    if vmin is not None or vmax is not None:
+        ax.set_ylim(bottom=vmin, top=(vmax if vmax is not None else y_top))
+    else:
+        ax.set_ylim(top=y_top)
+
+    # Annotations — positioned relative to the final axis bounds (after the
+    # user's pmin/pmax/vmin/vmax have been applied), in axes-fraction coords.
+    ax.text(0.72, 0.7, r'$t_{\sf mem} \sim e^{\beta J v e^{\beta J}}$',
+            transform=ax.transAxes, ha='center', va='center', fontsize=13)
+    ax.text(0.07, 0.1, r'$t_{\sf mem} \sim e^{\beta J}$',
+            transform=ax.transAxes, ha='left', va='center', fontsize=13)
+
+    ax.set_xlabel(r'$p$')
+    ax.set_ylabel(r'$v$')
+    ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    plt.tight_layout()
+    plt.show()
 
 
 def main():
     parser = argparse.ArgumentParser(description='Plot data from sliding_ising_chain.jl')
     parser.add_argument('files', nargs='+', help='JLD2 files to plot')
     parser.add_argument('--mode', type=str, default='auto',
-                        choices=['auto', 'erosion_test', 'energy', 'teff', 'mixing', 'ffs', 'history'],
+                        choices=['auto', 'erosion_test', 'energy', 'teff', 'mixing', 'ffs', 'history', 'phase_diagram', 'diffusion'],
                         help='Mode to plot (default: auto-detect from first file)')
     parser.add_argument('--raw', action='store_true',
                         help='Plot P_shrink vs l instead of l/lc (erosion_test mode)')
     parser.add_argument('--small_stats', action='store_true',
                         help='Plot 1-P_shrink vs (l-lc)^2 for l<=lc on log scale (erosion_test mode)')
+    parser.add_argument('--logy', action='store_true',
+                        help='Use log y-scale on the 1-P_shrink vs l/lc plot (erosion_test mode)')
     parser.add_argument('--heat', action='store_true',
                         help='Plot heat flow instead of energy (energy mode)')
     parser.add_argument('--inset', action='store_true',
                         help='Add inset showing exponential fit coefficients (mixing/ffs modes, requires multiple files)')
+    parser.add_argument('--fit_inset', action='store_true',
+                        help='Add an inset showing the linear-fit slope vs the per-file fixed parameter. '
+                             'Erosion mode: slope of lc vs e^(beta J). '
+                             'ffs/mixing modes: fit log10(t_mem) = s*x + b on the last half of each curve '
+                             '(in whatever x-axis is being plotted, including --alpha transforms), draw the fits '
+                             'as dashed black lines, and the inset plots s vs v (for p-sweeps) or vs '
+                             'e^(beta J) / (beta J)^alpha (for v-sweeps).')
+    parser.add_argument('--pmin', type=float, default=None,
+                        help='Lower x-limit on the phase_diagram plot')
+    parser.add_argument('--pmax', type=float, default=None,
+                        help='Upper x-limit on the phase_diagram plot')
+    parser.add_argument('--vmin', type=float, default=None,
+                        help='Lower y-limit on the phase_diagram plot')
+    parser.add_argument('--vmax', type=float, default=None,
+                        help='Upper y-limit on the phase_diagram plot')
+    parser.add_argument('--t_max', type=int, default=None,
+                        help='Truncate history-mode plot to t in [0, t_max]')
+    parser.add_argument('--hide_ticks', action='store_true',
+                        help='Hide axis ticks and tick labels (history mode)')
+    parser.add_argument('--ploglog', action='store_true',
+                        help='ffs mode: log-log plot of log10(tau) vs p, with '
+                             'per-file power-law fit log tau ~ p^a')
+    parser.add_argument('--anchor_normalize', action='store_true',
+                        help='ffs overlay mode: rescale each FFS curve so '
+                             'its value at the smallest x matches the direct '
+                             '(mixing) value at the same x. Tests whether '
+                             'FFS and direct differ by a constant factor.')
+    parser.add_argument('--a', type=float, default=None,
+                        help='ffs mode: plot tau against x**a instead of x '
+                             '(useful for testing log tau ~ p^a)')
+    parser.add_argument('--alpha', type=float, default=None,
+                        help='ffs/mixing mode: when sweeping p, plot tau '
+                             'against (beta J)**alpha = (ln p)**alpha instead '
+                             'of p. A straight line on log-y means '
+                             'log tau ~ (beta J)^alpha.')
+    parser.add_argument('--xlogsqq', action='store_true',
+                        help='ffs mode (GKL, p-sweep): plot t_mem against '
+                             '(log(1/p))^2.')
+    parser.add_argument('--xq', action='store_true',
+                        help='ffs mode (GKL, p-sweep): plot t_mem against 1/p.')
+    parser.add_argument('--xp', action='store_true',
+                        help='ffs mode (GKL, p-sweep): plot t_mem against p '
+                             '(explicit default; useful to override an implicit '
+                             'transform).')
+    parser.add_argument('--xr', action='store_true',
+                        help='ffs mode (sliding Ising, p-sweep): plot t_mem '
+                             'against (beta J)^2 = (log(1/p))^2 (same transform '
+                             'as --xlogsqq but labeled with the sliding-Ising '
+                             'temperature variable).')
+    parser.add_argument('--xscale', choices=['linear', 'log'], default=None,
+                        help='Force the x-axis scale to linear or log on every '
+                             'figure produced this run, overriding all other defaults.')
+    parser.add_argument('--yscale', choices=['linear', 'log'], default=None,
+                        help='Force the y-axis scale to linear or log on every '
+                             'figure produced this run, overriding all other defaults.')
 
     args = parser.parse_args()
+
+    # Global axis-scale override: monkey-patch plt.show so that every figure
+    # produced by any plot function has its scales forced to the requested
+    # value just before display. Applied to all axes in the figure (including
+    # inset axes); failures on individual axes are silently ignored (e.g. a
+    # data range that includes 0 or negative values when forcing log).
+    if args.xscale is not None or args.yscale is not None:
+        _orig_show = plt.show
+        def _show(*a, **kw):
+            for fignum in plt.get_fignums():
+                for ax in plt.figure(fignum).get_axes():
+                    if args.xscale is not None:
+                        try:
+                            ax.set_xscale(args.xscale)
+                        except Exception:
+                            pass
+                    if args.yscale is not None:
+                        try:
+                            ax.set_yscale(args.yscale)
+                        except Exception:
+                            pass
+            return _orig_show(*a, **kw)
+        plt.show = _show
 
     # Detect mode from first file if auto
     if args.mode == 'auto':
@@ -789,20 +1809,44 @@ def main():
     else:
         mode = args.mode
 
+    # Auto-overlay: when the file list contains a mix of FFS and mixing files
+    # (regardless of `mode`), route FFS files to plot_ffs_mode and pass mixing
+    # files as a scatter-overlay set. Used for the ising.jl benchmark.
+    per_file_modes = [load_jld2_data(fn).get('mode') for fn in args.files]
+    if 'ffs' in per_file_modes and 'mixing' in per_file_modes:
+        ffs_files = [fn for fn, m in zip(args.files, per_file_modes) if m == 'ffs']
+        mixing_files = [fn for fn, m in zip(args.files, per_file_modes) if m == 'mixing']
+        plot_ffs_mode(ffs_files, inset=args.inset, ploglog=args.ploglog,
+                      a_exp=args.a, alpha=args.alpha, fit_inset=args.fit_inset,
+                      mixing_overlay=mixing_files,
+                      anchor_normalize=args.anchor_normalize,
+                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr)
+        return
+
     if mode == 'erosion_test':
-        plot_erosion_mode(args.files, raw=args.raw, small_stats=args.small_stats)
+        plot_erosion_mode(args.files, raw=args.raw, small_stats=args.small_stats,
+                          fit_inset=args.fit_inset, logy=args.logy)
     elif mode == 'energy':
         plot_energy_mode(args.files, heat=args.heat)
     elif mode == 'teff':
         plot_teff_mode(args.files)
     elif mode == 'mixing':
-        plot_mixing_mode(args.files, inset=args.inset)
+        plot_mixing_mode(args.files, inset=args.inset, alpha=args.alpha,
+                         fit_inset=args.fit_inset)
     elif mode == 'ffs':
-        plot_ffs_mode(args.files, inset=args.inset)
+        plot_ffs_mode(args.files, inset=args.inset, ploglog=args.ploglog,
+                      a_exp=args.a, alpha=args.alpha, fit_inset=args.fit_inset,
+                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr)
     elif mode == 'history':
-        plot_history_mode(args.files)
+        plot_history_mode(args.files, t_max=args.t_max, hide_ticks=args.hide_ticks)
+    elif mode == 'phase_diagram':
+        plot_phase_diagram_mode(args.files, raw=args.raw,
+                                pmin=args.pmin, pmax=args.pmax,
+                                vmin=args.vmin, vmax=args.vmax)
+    elif mode == 'diffusion':
+        plot_diffusion_mode(args.files)
     else:
-        print(f"Unknown mode '{mode}'. Supported: erosion_test, energy, mixing, history")
+        print(f"Unknown mode '{mode}'. Supported: erosion_test, energy, mixing, history, phase_diagram, diffusion")
 
 
 if __name__ == "__main__":

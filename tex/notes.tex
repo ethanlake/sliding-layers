@@ -1,0 +1,142 @@
+\documentclass[12pt]{article}
+\usepackage[usenames,dvipsnames,svgnames,table]{xcolor}
+\usepackage[a4paper,
+left=1.1in,right=1.1in,top=1.1in,bottom=1.3in]{geometry}
+\input{ethans_preamble.tex}
+\usepackage{tikz}
+%\usepackage{tableof}
+%\AtBeginDocument{\tofOpenTocFileForWrite}
+
+
+\usepackage{subcaption}
+%\newcommand{\mytitle}[1]{\title{\textsf{\underline{ #1 }}}}
+%\renewcommand{\uvmu}{{\boldsymbol{\hat\mu}}}
+%\usepackage{booktabs}
+%\usepackage{fontspec}
+%\setmainfont{Palatino}
+%\usepackage{pxfonts}
+%\usepackage{newpxtext}
+%\usepackage{newpxmath}
+\newcommand{\plog}{p_{\sf log}}
+\newcommand{\tdec}{T_{\sf dec}}
+\newcommand{\poly}{{\rm poly}}
+\newcommand{\kmax}{{k_{\rm max}}}
+\newcommand{\ler}{\ell_{\sf er}}
+\newcommand{\tmem}{t_{\sf mem}}
+\newcommand{\prl}{{||}}
+
+\begin{document}
+	\title{Simple sliding Ising models}
+	\author{Ethan Lake}
+	\date{} 
+	\maketitle 
+	
+		\begin{itemize}
+		\item we have a $PT$ symmetry which I guess is very nearly spontaneously broken? Is the generalized DB that this gives helpful in any way? 
+		\item should mention that we have a phase transition where the maximum of the susceptibility / binder crossing drifts very slowly as $T_{c,{\rm eff}} \sim 1/\log \log L$. very nearly have a phase transition (get claude to make plots) 
+		\item outlook: higher dimensions. doesn't save you from instability against a field, but dramatically increases the metastability radius. would be interesting to work out / to look at rotors. 
+		\item stress that getting $\exp(\omega(\beta))$ lifetime is impossible in equilibrium. stress that how well one can do is a fundamental open question. 
+		\item other examples of simple driven refrigerators: shear-induced crystallization and laser cooling. 
+	\end{itemize}
+
+	\section*{One dimension} 
+	
+	Consider two ferromagnetically coupled 1d Ising chains that are coupled to a common thermal bath at temperature $T$, and are driven out of equilibrium by sliding against one another at velocity $v$ (we will take the top chain to move at velocity $+v/2$, and the bottom at velocity $-v/2$). The Hamiltonian is 
+	\be H(t) = -J_\prl \sum_{i;a=t,b} s_{i,a} s_{i+1,a} - J_\perp  \sum_i s_{i+vt/2,t} s_{i-vt/2,b} - h \sum_{i;a=t,b} s_{i,a},\ee 
+	where the indices $t/b$ label the top and bottom chains. For simplicity we will have the sliding occur in discrete time, where the dynamics does the following ad infinitum: 
+	\begin{enumerate}
+		\item Moves the top chain by 1 site. 
+		\item Performs $2L\g/v$ Glauber updates on random sites, where $\g$ is an update rate. 
+	\end{enumerate}
+	Thus on average, a spin on one chain moves by $v/\g$ sites relative to the other chain in between each time that it updates. While we have phrased this in terms of just the top chain moving, we will usually imagine boosting into a frame moving at velocity $v/2$, so that the top / bottom chain moves at speed $\pm v/2$, as above. 
+		
+
+
+	\ss*{$v\ra\infty$ limit} 
+	The Hamiltonian then reduces to that of a single chain: 
+	\be H = - \sum_i \( (J_\perp \lan s\ran + h) s_i + J_\prl s_is_{i+1}\).\ee 
+	We then solve for $\lan s\ran$ using a self-consistency equation derived from the exact expression for the average magnetization of a 1d Ising model in a field $\eta=J_\perp \lan s \ran + h$. This is easily arrived at using the transfer matrix approach. Recall that the transfer matrix is 
+	\be T = \bpm e^{\b (J_\prl+\eta)} & e^{-\b J_\prl} \\ e^{-\b J_\prl} & e^{\b(J_\prl-\eta)} \epm,\ee 
+	and the free energy density is 
+	\be F = -\frac1\b \ln \l_+,\ee 
+	with $\l_+$ the largest eigenvalue of $T$. Some algebra gives 
+	\be F = -J_\prl - \frac1\b \ln\( \cosh(\b \eta) + \sqrt{\cosh^2(\b\eta) - 2e^{-2\b J_\prl} \sin(2\b J_\prl)}\).\ee 
+	Taking the derivative with respect to $\eta$ then gives the magnetization 
+	\be m = \frac{\sinh(\b \eta)}{\sqrt{\cosh^2(\b \eta) - 2e^{-2\b J_\prl} \sinh(2\b J_\prl)}}.\ee 
+	In the present mean-field model, we thus have the self-consistent relation 
+	\be \lan s \ran = \frac{\sinh(\b (J_\perp \lan s\ran + h))}{\sqrt{\cosh^2(\b (J_\perp \lan s \ran + h) - 2e^{-2\b J_\prl} \sinh(2\b J_\prl)}}.\ee 
+	Taking $J_\perp = J_\prl = 1$ gives the phase diagram 
+	\be \igpfc{sliding_mf_pd.pdf}\ee 
+	where we show the value of $\lan s\ran$ in the less stable minimum (if multiple minima exist). 
+	
+	\ss*{Erosion length} 
+	
+	When the domain is sufficiently large, its endpoints thus undergo an unbiased random walk. 
+	Let us define $\ler$ as the length scale at which this occurs, viz. the scale below which the random walk binds. 
+	
+	
+	\be \ler \sim  v e^{\b (J-|h|)}.\ee 
+	
+	Let us now test this in numerics. Here we will define $\ler$ as 
+	\be \label{lerscaling} \ler = {\sf argmin}_l | P_{\sf er}(\ell) - 0.9|,\ee 
+	where $P_{\sf er}(\ell)$ is the probability that an initial both-chain minority domain of size $\ell$ is eroded by time $\ct(\ell)$. Here, we define ``eroded'' to mean that the number of sites where both spins 
+	
+	For $v=3$, we find, for various values of $\ell < \ler$: 
+	\be \igpfc{Per_concentration.pdf} \ee 
+		In practice, we use a binary search over domain sizes to quickly narrow down on the correct value. We also take the system size to be $l(v+1)$, which is large enough so that there is not enough time for periodic boundary conditions to be important, but small enough that the shrinking of the minority domain can be estimated simply by looking at the magnetization of the full system. 
+	
+	Measuring this in numerics at zero field, we find, first varying $v$ at fixed $p= e^{\b J}$: 
+	\be \igpfc{lervsv_h0} \ee 
+	% p sliding_plotter.py data/ising_sliding_erosion_p3.00.jld2 data/ising_sliding_erosion_p4.00.jld2 data/ising_sliding_erosion_p5.00.jld2
+	% julia --project=. -t auto simulation_driver.jl --mode=erosion_test --vary_v=true --p=3 --v_min=0.5 --v_max=8.0 --n_steps=20 --erosion_num_trials=10000
+	and then, varying $p$ at fixed $v$, 
+	\be \igpfc{lervsp_h0} \ee 
+	% p sliding_plotter.py data/ising_sliding_erosion_v2.50.jld2 data/ising_sliding_erosion_v3.00.jld2 data/ising_sliding_erosion_v3.50.jld2
+	% julia --project=. -t auto simulation_driver.jl --mode=erosion_test --v=2.5 --p_min=2 --p_max=8 --n_steps=12 --erosion_num_trials=40000 --lmin=5
+	confirming the scaling in \eqref{lerscaling}. 
+	
+	We also observe that---as the random walk intuition suggests---$P(\ell)$ decays very quickly for $\ell < \ler$, with 
+	\be P(\ell) \sim \exp\( - \frac{(\ell - \ler)^2}{2\ler^2\s^2}\),\ee 
+	with $\s^2$ a $v$-dependent but $\ell$-independent constant. 
+	
+	\ss*{Memory time} 
+	We now determine the memory time. Let us start by reviewing some simpler cases. 	
+	For a single chain, a domain wall does a random walk with a $\b J$-independent diffusion constant when $h=0$, and ballistically expands when $h \neq 0$. This then gives 
+	\be \tmem \sim e^{2\b(2J-h)},\ee 
+	coming just from the nucleation of a single minority spin ($\tmem$ is numerically much smaller when $h\neq 0$, but the scaling with $e^{\b J}$ is unchanged). 
+	
+	 For a two-layer chain with $v=0$, to mix we have to nucleate a minority domain on both legs. In this case the diffusion constant (or velocity) of the domain wall is itself suppressed in $e^{-\b (J-h)}$, which means that we mix mostly just by directly creating stable minority domains at a large density of sites, rather than creating a small density of domains which then expand. Looking at the energy barrier that needs to be crossed, we conclude 
+	 \be \tmem|_{v=0} \sim e^{2\b(5J-3h)}.\ee 
+	 Since this has a rather strong dependence on $e^{\b J}$, to numerically analyze things we will often find it helpful to work with $h\neq 0$. 
+	
+	Now let us look at $v\neq 0$. Because of the above discussion regarding $\ler$, we expect the scaling 
+	\be \tmem \sim ( e^{\b J})^{\ler} \sim e^{\b J v e^{\b J}}.\ee 
+	We obviously have no hope of measuring this scaling by naive Monte Carlo. Luckily, we in a perfect setting for the application of forward flux sampling. Here are some details about our implementation: 
+	\begin{itemize}
+		\item We first run a simulation for time $t$ such that $1 \ll t  \ll \tmem$, to characterize properties of the metastable minimum 
+	\end{itemize}
+	
+	Running this gives 
+	\be \igpfc{ffs_tmem_vs_v.pdf}\ee
+	\ethan{this gives $\tmem \sim e^{c v}$, but $c$ doesn't seem $\propto e^{\b J}$. this could be because the FFS method underestimates (?) $\tmem$ at large $e^{\b J}$. Or because somehow the actual memory lifetime is not actually $\exp(\ler)$, either $\exp(\ler^{\a <1})$ or not even exponential because of what we noticed about $P_{\sf er}$? } 
+	\ethan{could potentially find the configurations that lead to a failure and visualize their dynamics explicitly!}
+	\ethan{weird behavior at $L=2000$}
+	%p sliding_plotter.py data/ising_sliding_ffs_L2000_v6.00.jld2 data/ising_sliding_ffs_L1000_v6.00.jld2 data/ising_sliding_ffs_L500_v6.00.jld2
+	
+	\be \igpfc{ffs_tmem_vs_p.pdf} \ee 
+		% p sliding_plotter.py data/ising_sliding_ffs_L500_v2.00.jld2 data/ising_sliding_ffs_L500_v3.00.jld2 data/ising_sliding_ffs_L1000_v4.00.jld2 data/ising_sliding_ffs_L1000_v5.00.jld2 data/ising_sliding_ffs_L1000_v6.00.jld2
+	\section*{Two dimensions} 
+	
+
+
+	\section*{Measuring temperature} 
+	
+	It was easy to realize that the average energy $\lan E\ran$ can be a decreasing function of $v$. But, does sliding the system actually cool it? Just decreasing the average of $E$ is not in general enough: a priori the fluctuations could be strong enough to still make the state ``hotter'' than it was before. How then do we get a good temperature diagnostic? Here are a few ways:  
+	\begin{itemize}
+		\item {\it Naive fluctuation-dissipation:}
+		\item {\it The demon:}  
+		\item {\it Brownian motion of a coupled mass:}
+		\item {\it Dynamic fluctuation-dissipation:}
+	\end{itemize}
+	
+\end{document}

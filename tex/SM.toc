@@ -1,0 +1,16 @@
+\contentsline {section}{\numberline {1}Size of the danger region}{1}{section.1}%
+\contentsline {section}{\numberline {2}Phase diagram in the $v\rightarrow \infty $ limit}{2}{section.2}%
+\contentsline {section}{\numberline {3}Details about forward-flux sampling}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Setup}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Phase 0: initial flux}{4}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Placement of the first interface}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Phase $k$: interface advancement}{5}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Adaptive interface placement}{6}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Combining the phases}{6}{subsection.3.6}%
+\contentsline {subsection}{\numberline {3.7}Isolating the nucleation rate}{7}{subsection.3.7}%
+\contentsline {subsection}{\numberline {3.8}Independent repetitions and error bars}{7}{subsection.3.8}%
+\contentsline {section}{\numberline {4}Memory in the GKL automaton}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Setup and background}{7}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Scaling of the erosion length}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Domain wall diffusion}{8}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Scaling of $t_{\sf mem}$}{9}{subsection.4.4}%
