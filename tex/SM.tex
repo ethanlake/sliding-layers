@@ -3,6 +3,7 @@
 \usepackage[a4paper,
 left=1.1in,right=1.1in,top=1.1in,bottom=1.3in]{geometry}
 \providecommand{\cp}{}
+\usepackage[numbers,sort&compress]{natbib} % load before hyperref (in preamble) for numeric APS-style citations
 \input{ethans_preamble.tex}
 \usepackage{tikz}
 %\usepackage{tableof}
@@ -60,9 +61,25 @@ Therefore the area of the danger region is
 \bea |\dr(l)| & = \frac12 |\bfA\bfC \times \bfA\bfB| \\ & = \frac12 | (x_C-l/2),t_C) \times (-l/2 , t_B)| \\ & = \frac{l^2 \d}{4v(v-\d)},\eea 
 giving the result quoted in the main text. 
 
+\section{More data on the scaling of $t_{\sf mem}$}
+
+In this section, we provide more detail regarding what the numerics say about the scaling of the memory time with $\b J$ and $v$. 
+
+First for the scaling with $\b J$. For the reasons explained in the main paper, we examine the nucleation-assisted memory time $\wt t_{\sf mem}$, with automatic injection of size 2 domains occurring in the maaximally magnetized states. 
+Running a linear fit of $\ln \wt t_{\sf mem}$ to $(\b J)^2$ gives
+\be \igpfc{tmemtilde_vs_r_a2fit} \ee 
+where the bottom panel shows the residuals of the fit. On the other hand, running a linear fit of $\ln \wt t_{\sf mem}$ to $\b J$ gives 
+\be \igpfc{tmemtilde_vs_r_a1fit} \ee 
+with clearly worse residuals and a systematic curvature away from a linear fit. 
+
+For the scaling with $v$, we re-plot the data in the main text, but now with the residual against a linear fit of $\ln \wt t_{\sf mem}$ to $v$. This gives 
+\be \igpfc{tmem_vs_v_with_residual} \ee 
+showing that the fit becomes good quality when $v > 2$, as expected. 
+
+
 \section{Phase diagram in the $v\ra \infty$ limit}
 
-When $v \ra \infty$, the dynamics enters a simple mean-field limit: one chain couples randomly to sites of the other, seeing only (in expectation) the other chain's average magnetization. Since the two chains are statistically the same, we expect the dynamics in this limit to be governed by thermal dynamics with respect to the time-{\it independent} Hamiltonian 
+When $v \ra \infty$, the dynamics enters a simple mean-field limit: one chain couples randomly to sites of the other, seeing only (in expectation) the other chain's average magnetization (see also e.g.  \cite{kadau2008magnetic}). Since the two chains are statistically the same, we expect the dynamics in this limit to be governed by thermal dynamics with respect to the time-{\it independent} Hamiltonian 
 \be H = - \sum_i \( (J \lan s\ran + h) s_i + J s_is_{i+1}\)\ee
 where we have included an additional external magnetic field $h$ for completeness.  
 We then solve for $\lan s\ran$ using a self-consistency equation derived from the exact expression for the average magnetization of a 1d Ising model in a field $\eta=J \lan s \ran + h$. This is easily arrived at using the transfer matrix approach. Recall that the transfer matrix is 
@@ -175,7 +192,7 @@ where the $\sim$ omits $\ep$-independent factors.
 Since an error that occurs in the danger region can grow a minority domain of size $l$ to one of size $\l l$ with $\l > 1$, growing a domain to size $\ler$ only requires $\log_\l \ler$ steps. Thus 
 \be \label{gkl_tmem} \tmem \sim \ep^{-\log_\l \ler} = e^{-\ct(\log ^2\ep)}.\ee 
 
-While Ref.~\cite{park1997ergodicity} did not make rigorous statements about the case of unbiased noise, the physical arguments above do not depend crucially on taking $\eta \neq 0$. However, in \cite{de1992gacs} it was proposed from direct Monte Carlo numerics that in fact $\tmem = e^{\ct(1/\ep)}$ when $\eta = 0$. Unfortunately, distinguishing between $e^{\ct(1/\ep)}$ and $e^{\ct( \log^2 \ep)}$ is very difficult in naive Monte Carlo, especially with the limited range of $\ep$ values accessible in \cite{de1992gacs}. In what follows, we revisit this question with more precise numerics. 
+While Ref.~\cite{park1997ergodicity} did not make rigorous statements about the case of unbiased noise, the physical arguments above do not depend crucially on taking $\eta \neq 0$. However, in \cite{de1992gacs} it was proposed from direct Monte Carlo numerics that in fact $\tmem = e^{\ct(1/\ep)}$ when $\eta = 0$. Unfortunately, distinguishing between $e^{\ct(1/\ep)}$ and $e^{\ct( \log^2 \ep)}$ is very difficult in naive Monte Carlo, especially with the limited range of $\ep$ values accessed in \cite{de1992gacs}. In what follows, we revisit this question with more precise numerics. 
 
 \ss{Scaling of the erosion length} 
 
@@ -197,6 +214,7 @@ Plotting $\tmem$ against $(\log(1/\ep))^2$, we find
 The same data plotted against $1/\ep$ clearly reveal that \eqref{gkl_tmem} fits the data better: 
 \be \igpfc{gkl_tmem_vsq} \ee 
 
-\bibliography{paper.bib}
+\bibliographystyle{apsrev4-2}
+\bibliography{paper}
 
 \end{document}

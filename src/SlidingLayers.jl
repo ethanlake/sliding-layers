@@ -2,7 +2,7 @@ module SlidingLayers
 
 __precompile__(true)
 
-using Printf, Random, JLD2, Statistics, InteractiveUtils, ProgressMeter, Plots
+using Printf, Random, JLD2, Statistics, InteractiveUtils, ProgressMeter
 
 include("types.jl")
 include("core.jl")

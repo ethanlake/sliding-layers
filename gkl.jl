@@ -274,7 +274,7 @@ function run_history_mode(; L::Int, eta::Float64, p_noise::Float64,
                             update::Symbol=:sync, T_steps::Int=500,
                             init::String="domain",
                             domain_start::Int=3L÷8, domain_end::Int=5L÷8,
-                            show_plot::Bool=false, kwargs...)
+                            kwargs...)
     println("=== Noisy GKL: History Mode ===")
     println("L = $L, η = $eta, p_noise = $p_noise, update = $update, T = $T_steps, init = $init")
 
@@ -293,19 +293,6 @@ function run_history_mode(; L::Int, eta::Float64, p_noise::Float64,
         true
     end)
     println("Done!")
-
-    if show_plot
-        @eval Main using Plots
-        fig = Base.invokelatest(Plots.heatmap, history;
-                                c=:RdBu, clims=(-1.5, 1.5),
-                                xlabel="site", ylabel="t",
-                                title=@sprintf("GKL L=%d, η=%.3f, p=%.3f, %s",
-                                               L, eta, p_noise, update),
-                                size=(400, 700))
-        Base.invokelatest(display, fig)
-        println("Close the plot window (or press Enter) to exit...")
-        try readline() catch end
-    end
 
     return Dict{String, Any}(
         "magnetization_history" => history,
@@ -1077,11 +1064,10 @@ end
 # (mirror of src/erosion_test.jl:74-112)
 # ---------------------------------------------------------------------
 function plot_erode_vs_l(lc::Int, eta::Float64, p_noise::Float64, update::Symbol,
-                          thresh_prob::Float64, n_samples::Int;
+                          n_samples::Int;
                           t_evolve_factor::Float64=2.0,
                           L_sys_factor::Float64=1.0,
-                          cache::Dict{Int,Float64}=Dict{Int,Float64}(),
-                          show_plots::Bool=false)
+                          cache::Dict{Int,Float64}=Dict{Int,Float64}())
     l_min = max(4, round(Int, lc / 5))
     l_max = lc
     l_values = collect(unique(round.(Int, range(l_min, l_max, length=20))))
@@ -1101,19 +1087,6 @@ function plot_erode_vs_l(lc::Int, eta::Float64, p_noise::Float64, update::Symbol
         push!(probs, sp)
     end
 
-    if show_plots
-        @eval Main using Plots
-        fig = Base.invokelatest(Plots.plot, l_values, probs;
-                                 seriestype=:scatter,
-                                 xlabel="l", ylabel="shrink probability",
-                                 title=@sprintf("GKL lc = %d, η = %.3f, p = %.3f", lc, eta, p_noise),
-                                 legend=false, markersize=5, size=(500, 400))
-        Base.invokelatest(Plots.hline!, fig, [thresh_prob]; linestyle=:dash, color=:red, linewidth=1.5)
-        Base.invokelatest(Plots.vline!, fig, [lc]; linestyle=:dash, color=:gray, linewidth=1.0)
-        Base.invokelatest(display, fig)
-        println("  Close the plot window to continue...")
-        readline()
-    end
     return (l_values, collect(probs))
 end
 
@@ -1187,7 +1160,6 @@ function run_ler_mode(; eta::Float64, p_noise::Float64,
                        L_sys_factor::Float64=1.0,
                        erode_vs_l::Bool=false,
                        show_histories::Bool=false,
-                       show_plots::Bool=false,
                        sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
                        kwargs...)
     eta = abs(eta)
@@ -1241,10 +1213,10 @@ function run_ler_mode(; eta::Float64, p_noise::Float64,
                                    t_evolve_factor, L_sys_factor)
         end
         if erode_vs_l
-            (ls, ps) = plot_erode_vs_l(lc, eta_cur, p_cur, update, thresh_prob,
+            (ls, ps) = plot_erode_vs_l(lc, eta_cur, p_cur, update,
                                        erosion_num_trials;
                                        t_evolve_factor, L_sys_factor,
-                                       cache=sp_cache, show_plots)
+                                       cache=sp_cache)
             push!(erode_l_data, ls)
             push!(erode_prob_data, ps)
         end
@@ -1617,7 +1589,6 @@ if mode == "history"
     init = "domain"
     domain_start = 3L ÷ 8
     domain_end = 5L ÷ 8
-    show_plot = false
 elseif mode == "ffs"
     L = 500
     p_noise = 0.10
@@ -1655,7 +1626,6 @@ elseif mode == "ler"
     L_sys_factor = 1.0
     erode_vs_l = false
     show_histories = false
-    show_plots = false
 elseif mode == "diffusion"
     L = 500
     p_noise = 0.05
@@ -1690,7 +1660,6 @@ if mode == "history"
     init = String(parse_arg("init", init))
     domain_start = parse_arg("domain_start", 3L ÷ 8)
     domain_end = parse_arg("domain_end", 5L ÷ 8)
-    show_plot = parse_arg("show_plot", show_plot)
 elseif mode == "ffs"
     L = parse_arg("L", L)
     p_noise = parse_arg("p_noise", p_noise)
@@ -1729,7 +1698,6 @@ elseif mode == "ler"
     L_sys_factor = parse_arg("L_sys_factor", L_sys_factor)
     erode_vs_l = parse_arg("erode_vs_l", erode_vs_l)
     show_histories = parse_arg("show_histories", show_histories)
-    show_plots = parse_arg("show_plots", show_plots)
     (p_min, p_max, p_noise, sweep_values_override) = _resolve_pqtau_gkl(p_min, p_max, p_noise, n_steps)
 elseif mode == "diffusion"
     L = parse_arg("L", L)
@@ -1764,7 +1732,6 @@ if mode == "history"
     kwargs[:init] = init
     kwargs[:domain_start] = domain_start
     kwargs[:domain_end] = domain_end
-    kwargs[:show_plot] = show_plot
 elseif mode == "ffs"
     kwargs[:L] = L
     kwargs[:p_noise] = p_noise
@@ -1800,7 +1767,6 @@ elseif mode == "ler"
     kwargs[:L_sys_factor] = L_sys_factor
     kwargs[:erode_vs_l] = erode_vs_l
     kwargs[:show_histories] = show_histories
-    kwargs[:show_plots] = show_plots
 elseif mode == "diffusion"
     kwargs[:L] = L
     kwargs[:p_noise] = p_noise

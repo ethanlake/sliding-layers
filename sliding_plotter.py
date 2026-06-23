@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib.lines import Line2D
+from matplotlib.container import ErrorbarContainer
 import h5py
 import argparse
 import os
@@ -26,6 +28,9 @@ except:
 
 matplotlib.rcParams['text.usetex'] = True
 matplotlib.rcParams['font.family'] = 'serif'
+# amsmath gives us \boldsymbol (needed for bolding math italic + Greek in
+# the history-mode v±δ annotations). Harmless everywhere else.
+matplotlib.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'
 # matplotlib.rcParams['font.serif'] = ['Times New Roman', 'Times', 'DejaVu Serif']
 matplotlib.rcParams['font.size'] = 20
 matplotlib.rcParams['axes.labelsize'] = 16
@@ -43,11 +48,56 @@ linewidth = 2.75
 marker_size = 6.5
 cmap = plt.cm.coolwarm_r
 
+# Set by main() when --cmap is provided. When non-None, it globally overrides
+# every per-file color picker below (the default coolwarm_r, the GKL rainbow,
+# the Oranges-for-v-sweep / Blues-for-p-sweep choices in plot_ffs_mode, etc.).
+_USER_CMAP = None
+
+# Set by main() when --legloc is provided. When non-None, every ax.legend()
+# call below uses this loc string instead of its hard-coded default.
+_USER_LEGLOC = None
+
+
+def _user_or(default_cmap_obj):
+    """Return the --cmap override if set, otherwise `default_cmap_obj`."""
+    return _USER_CMAP if _USER_CMAP is not None else default_cmap_obj
+
+
+def _legloc(default='best'):
+    """Return the --legloc override if set, otherwise `default`."""
+    return _USER_LEGLOC if _USER_LEGLOC is not None else default
+
+
+def _legend_no_errorbars(ax, **kwargs):
+    """Like ax.legend(**kwargs), but the legend marker for any ax.errorbar()
+    curve drops the error-bar whiskers — only the bare marker is shown,
+    matching how the same curve is rendered in the data area (now that
+    connecting lines are off). Falls back to the default handle for anything
+    that isn't an ErrorbarContainer."""
+    handles, labels = ax.get_legend_handles_labels()
+    clean = []
+    for h in handles:
+        if isinstance(h, ErrorbarContainer) and h.lines:
+            ml = h.lines[0]
+            clean.append(Line2D([], [],
+                                marker=ml.get_marker(),
+                                color=ml.get_color(),
+                                markerfacecolor=ml.get_markerfacecolor(),
+                                markeredgecolor=ml.get_markeredgecolor(),
+                                markersize=ml.get_markersize(),
+                                linestyle='none'))
+        else:
+            clean.append(h)
+    return ax.legend(clean, labels, **kwargs)
+
 
 def _pick_cmap(filenames):
     """Return plt.cm.rainbow when any file in `filenames` has dynamics='gkl',
     otherwise the default `cmap` (coolwarm_r). Used so GKL plots get rainbow
-    colors across files while everything else keeps the default coolwarm."""
+    colors across files while everything else keeps the default coolwarm.
+    Overridden globally by --cmap."""
+    if _USER_CMAP is not None:
+        return _USER_CMAP
     try:
         for fn in filenames:
             if load_jld2_data(fn).get('dynamics') == 'gkl':
@@ -125,6 +175,7 @@ def load_jld2_data(filename):
             data['n_configs'] = get_scalar('n_configs')                 # old format
             data['n_configs_per_run'] = get_scalar('n_configs_per_run') # new format
             data['per_run_log_taus'] = get_array('per_run_log_taus')    # new format
+            data['seed_droplet_size'] = get_scalar('seed_droplet_size') # may be None on pre-seeding files
         elif 'lc_values' in top_keys:
             data['mode'] = 'erosion_test'
             data['p_values'] = get_array('p_values')  # None if vary_v
@@ -158,6 +209,8 @@ def load_jld2_data(filename):
             data['p_values'] = get_array('p_values')  # old format (p sweep)
             data['mean_energies'] = get_array('mean_energies')
             data['mean_heat_flows'] = get_array('mean_heat_flows')
+            data['mean_energies_std'] = get_array('mean_energies_std')      # may be None on old files
+            data['mean_heat_flows_std'] = get_array('mean_heat_flows_std')  # may be None on old files
         elif 'mean_mixing_times' in top_keys:
             data['mode'] = 'mixing'
             data['p_values'] = get_array('p_values')  # None if vary_v
@@ -336,12 +389,12 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
     ax.set_xlabel(xlabel or r'$p$')
     ax.set_ylabel(r'$\xi_{\sf er}$')
     if fit_inset:
-        leg = ax.legend(loc='lower right', frameon=True, fancybox=False,
+        leg = ax.legend(loc=_legloc('lower right'), frameon=True, fancybox=False,
                         edgecolor='none', framealpha=0.8)
         leg.get_frame().set_facecolor('white')
         leg.get_frame().set_linewidth(0)
     else:
-        ax.legend(loc='best', frameon=not True, fancybox=False,
+        ax.legend(loc=_legloc(), frameon=not True, fancybox=False,
                   edgecolor='black', framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
@@ -547,18 +600,22 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
             ax2.set_yscale('log')
         ax2.set_ylabel(r'$P_{\sf escape}(\ell)$' if has_escape_data else r'$1-P_{\sf er}(\ell)$')
         legend_title = r'$p$' if (small_stats and sweep_key == 'p') else None
-        ax2.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=legend_title)
+        ax2.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=legend_title)
         ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax2.set_axisbelow(True)
         plt.tight_layout()
         plt.show()
 
 
-def plot_energy_mode(filenames, heat=False):
+def plot_energy_mode(filenames, heat=False, fitrange=None, residuals=False):
     """Plot energy or heat flow data. New format: vs v (label by p). Old format: vs p (label by v)."""
-    fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    _want_res = (fitrange is not None) and residuals
+    fig, ax, residual_ax = _setup_residual_axes(_want_res)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    colors = _user_or(cmap)(np.linspace(0, 1, max(len(filenames), 2)))
+
+    if fitrange is not None:
+        print(f"Per-file linear fits ln(y) ~ x over upper {(1.0 - float(fitrange)) * 100:.0f}% of x:")
 
     for idx, filename in enumerate(filenames):
         data = load_jld2_data(filename)
@@ -568,11 +625,13 @@ def plot_energy_mode(filenames, heat=False):
 
         if heat:
             y_values = data.get('mean_heat_flows')
+            y_std = data.get('mean_heat_flows_std')
             if y_values is None:
                 print(f"Warning: {filename} has no heat flow data, skipping...")
                 continue
         else:
             y_values = data['mean_energies']
+            y_std = data.get('mean_energies_std')
 
         if data.get('vs') is not None:
             x = data['vs']
@@ -593,26 +652,66 @@ def plot_energy_mode(filenames, heat=False):
             label = rf'$v={v_label}$'
             xlabel = r'$p$'
 
+        # Use errorbar when block-averaged stderrs are present (saved by the
+        # post-2026 energy mode). Old files without these fields still plot
+        # via a plain line.
+        has_err = (y_std is not None and np.any(np.isfinite(y_std)))
         if heat:
-            ax.plot(x, y_values, '-o', color=colors[idx],
-                    markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=marker_size, linewidth=linewidth, alpha=0.7,
-                    label=label)
+            y_plot = y_values
+            yerr = y_std if has_err else None
         else:
-            ax.plot(x, y_values / y_values[0], '-o', color=colors[idx],
+            # Energies are normalised to the v=0 (or p=p_min) reference value.
+            # Stderr is first-order-propagated by the same factor; this ignores
+            # the small uncertainty in y_values[0] itself, which is fine since
+            # ⟨E⟩ at the reference is the best-determined point.
+            denom = y_values[0]
+            y_plot = y_values / denom
+            yerr = (y_std / denom) if has_err else None
+
+        if has_err:
+            ax.errorbar(x, y_plot, yerr=yerr, fmt='o', color=colors[idx],
+                        markerfacecolor=colors[idx], markeredgecolor='k',
+                        markersize=marker_size, linewidth=0, alpha=1.0,
+                        capsize=3, label=label)
+        else:
+            ax.plot(x, y_plot, 'o', color=colors[idx],
                     markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=marker_size, linewidth=linewidth, alpha=0.7,
+                    markersize=marker_size, linewidth=0, alpha=1.0,
                     label=label)
+
+        if fitrange is not None:
+            _do_fitrange_fit(ax, np.asarray(x), np.asarray(y_plot),
+                             fitrange, label, filename,
+                             residual_ax=residual_ax, color=colors[idx])
 
     ax.set_xlabel(xlabel)
     if heat:
         ax.set_ylabel(r'$\dot{Q}$')
     else:
-        ax.set_ylabel(r'$\langle E \rangle / \langle E_{v=0}\rangle$')
-    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=r'$p$')
+        ax.set_ylabel(r'$E(v) / E(0)$')
+    # Semitransparent white legend background (same style as the FFS / erosion
+    # plots): visible frame off, no edge, α≈0.5 so curves behind remain
+    # partially readable through it.
+    leg = _legend_no_errorbars(ax, loc=_legloc(), frameon=True, fancybox=False,
+                               edgecolor='none', framealpha=0.5,
+                               title=r'$e^{-\beta J}$')
+    leg.get_frame().set_facecolor('white')
+    leg.get_frame().set_linewidth(0)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
-    plt.tight_layout()
+    # v-sweep: force a major tick at every integer v in the visible range
+    # (matches the FFS-mode behaviour added earlier).
+    if xlabel == r'$v$':
+        try:
+            xmin, xmax = ax.get_xlim()
+            lo = int(np.ceil(xmin - 1e-9))
+            hi = int(np.floor(xmax + 1e-9))
+            if hi >= lo:
+                ax.set_xticks(list(range(lo, hi + 1)))
+        except Exception:
+            pass
+    if not _finalize_residual_panel(ax, residual_ax):
+        plt.tight_layout()
     plt.show()
 
 
@@ -620,7 +719,7 @@ def plot_teff_mode(filenames):
     """Plot T_eff vs p or v, with each file as a separate curve."""
     fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    colors = _user_or(cmap)(np.linspace(0, 1, max(len(filenames), 2)))
 
     xlabel = None
     for idx, filename in enumerate(filenames):
@@ -664,7 +763,7 @@ def plot_teff_mode(filenames):
 
     ax.set_xlabel(xlabel or r'$T$')
     ax.set_ylabel(r'$T_{\mathrm{eff}}$')
-    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+    ax.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     plt.tight_layout()
@@ -700,7 +799,7 @@ def plot_teff_mode(filenames):
                 sweep_key = 'T'
 
             n_curves = chi_matrix.shape[1] if chi_matrix.ndim == 2 else 1
-            curve_colors = cmap(np.linspace(0, 1, max(n_curves, 2)))
+            curve_colors = _user_or(cmap)(np.linspace(0, 1, max(n_curves, 2)))
 
             for i in range(n_curves):
                 if chi_matrix.ndim == 2:
@@ -734,7 +833,7 @@ def plot_teff_mode(filenames):
 
         ax2.set_xlabel(r'$C(0) - C(\tau)$')
         ax2.set_ylabel(r'$\chi(\tau)$')
-        ax2.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+        ax2.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
         ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax2.set_axisbelow(True)
         plt.tight_layout()
@@ -760,7 +859,7 @@ def plot_teff_mode(filenames):
                 sweep_key = 'T'
 
             n_curves = teff_pw.shape[1] if teff_pw.ndim == 2 else 1
-            curve_colors = cmap(np.linspace(0, 1, max(n_curves, 2)))
+            curve_colors = _user_or(cmap)(np.linspace(0, 1, max(n_curves, 2)))
 
             for i in range(n_curves):
                 if teff_pw.ndim == 2:
@@ -781,11 +880,128 @@ def plot_teff_mode(filenames):
 
         ax3.set_xlabel(r'$\tau$')
         ax3.set_ylabel(r'$T_{\mathrm{eff}}(\tau) = \partial_\tau C / R$')
-        ax3.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+        ax3.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
         ax3.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax3.set_axisbelow(True)
         plt.tight_layout()
         plt.show()
+
+
+def _setup_residual_axes(want_residuals):
+    """Build the figure used by ffs / mixing / energy plotters.
+
+    Returns (fig, ax, residual_ax). When `want_residuals` is False this is a
+    one-panel figure and residual_ax is None (preserves the original layout
+    for the default code path). When True we make a 3:1 two-panel gridspec
+    with sharex; the bottom panel is wired up with a y=0 guide, grid, and
+    label so callers only need to scatter their per-file residuals onto it.
+    """
+    if want_residuals:
+        # constrained_layout handles the two-panel sizing cleanly; matches
+        # what the bare-ax path gets from plt.tight_layout() at the end.
+        fig, axes = plt.subplots(2, 1, figsize=(4., 5.), dpi=100,
+                                 gridspec_kw={'height_ratios': [3, 1],
+                                              'hspace': 0.08},
+                                 sharex=True, constrained_layout=True)
+        ax, residual_ax = axes[0], axes[1]
+        residual_ax.axhline(0, color='k', linewidth=0.8, alpha=0.6, zorder=0)
+        residual_ax.set_ylabel(r'$\ln y - \mathrm{fit}$')
+        residual_ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+        residual_ax.set_axisbelow(True)
+        return fig, ax, residual_ax
+    fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    return fig, ax, None
+
+
+def _finalize_residual_panel(ax, residual_ax):
+    """Move the x-label from the top panel to the residual panel and hide the
+    top panel's x-tick labels. Called just before plt.show() in any plotter
+    that opted into the two-panel layout via _setup_residual_axes.
+
+    Returns True iff a residual panel is present, so callers can skip the
+    plt.tight_layout() call (residual figures use constrained_layout and
+    mixing the two is noisy)."""
+    if residual_ax is None:
+        return False
+    xlabel = ax.get_xlabel()
+    ax.set_xlabel('')
+    residual_ax.set_xlabel(xlabel)
+    plt.setp(ax.get_xticklabels(), visible=False)
+    return True
+
+
+def _do_fitrange_fit(ax, x_plot, y_vals, fitrange, label, filename,
+                     residual_ax=None, color=None):
+    """Linear fit of ln(y) vs x over the upper (1 − `fitrange`) of x.
+
+    Used by --fitrange. `x_plot` should be the *plotted* x-coordinate so the
+    fit-line lands on the same axis the curve was drawn on (so e.g. when the
+    user passed --a, x_plot is already x**a). Draws a black dashed line over
+    the fit range and prints slope ± se, intercept ± se, R², n to the
+    terminal. No-ops with an explanatory print if there aren't ≥ 2 finite,
+    positive-y points in the fit window.
+
+    When `residual_ax` is given (from --residuals), also scatters
+    r_i = ln(y_i) − (slope·x_i + intercept) for ALL finite, positive-y points
+    (including those outside the fit window — that's the whole point of the
+    diagnostic: see whether the model curves away on the un-fitted side).
+    Per-file `color` is used so the residual mapping matches the top panel.
+    """
+    x = np.asarray(x_plot, dtype=float)
+    y = np.asarray(y_vals, dtype=float)
+    mask = np.isfinite(x) & np.isfinite(y) & (y > 0)
+    label_str = label.strip('$') if label else filename
+    if np.sum(mask) < 2:
+        print(f"  --fitrange [{filename}]: <2 finite positive-y points, skipped.")
+        return
+    x_m, y_m = x[mask], y[mask]
+    x_lo, x_hi = float(np.min(x_m)), float(np.max(x_m))
+    x_cut = x_lo + float(fitrange) * (x_hi - x_lo)
+    fmask = x_m >= x_cut
+    if np.sum(fmask) < 2:
+        print(f"  --fitrange [{filename}]: window x >= {x_cut:.4g} keeps "
+              f"{int(np.sum(fmask))} points; need >=2, skipped.")
+        return
+    x_fit = x_m[fmask]
+    ln_y_fit = np.log(y_m[fmask])
+    slope, intercept = np.polyfit(x_fit, ln_y_fit, 1)
+    y_pred = slope * x_fit + intercept
+    ss_res = float(np.sum((ln_y_fit - y_pred) ** 2))
+    ss_tot = float(np.sum((ln_y_fit - np.mean(ln_y_fit)) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
+    n = len(x_fit)
+    slope_se = np.nan
+    intercept_se = np.nan
+    if n >= 3 and ss_res > 0:
+        s_resid = np.sqrt(ss_res / (n - 2))
+        x_var = float(np.sum((x_fit - x_fit.mean()) ** 2))
+        if x_var > 0:
+            slope_se = s_resid / np.sqrt(x_var)
+            intercept_se = s_resid * np.sqrt(1.0 / n + x_fit.mean() ** 2 / x_var)
+    se_slope = f" +/- {slope_se:.4g}" if np.isfinite(slope_se) else ""
+    se_int = f" +/- {intercept_se:.4g}" if np.isfinite(intercept_se) else ""
+    print(f"  --fitrange [{label_str}] ({filename}): "
+          f"x in [{x_cut:.4g}, {x_hi:.4g}], n={n}, "
+          f"slope = {slope:.4g}{se_slope}, "
+          f"intercept = {intercept:.4g}{se_int}, "
+          f"R^2 = {r2:.4g}")
+    fit_color = color if color is not None else 'k'
+    x_line = np.linspace(x_fit.min(), x_fit.max(), 100)
+    y_line = np.exp(slope * x_line + intercept)
+    ax.plot(x_line, y_line, '--', color=fit_color, linewidth=1.5, alpha=0.85,
+            zorder=1)
+
+    if residual_ax is not None:
+        # ALL points (in-window and outside) are scattered against the fit;
+        # systematic drift outside the fit window is exactly what we want to
+        # see for the "wrong exponent?" diagnostic.
+        residuals = np.log(y_m) - (slope * x_m + intercept)
+        col = color if color is not None else 'k'
+        order = np.argsort(x_m)
+        residual_ax.plot(x_m[order], residuals[order], '-o',
+                         color=col, markerfacecolor=col, markeredgecolor='k',
+                         markersize=marker_size * 0.75,
+                         linewidth=linewidth * 0.6, alpha=1.0, zorder=2)
 
 
 def _add_fit_inset(ax, curve_data, colors, x_transform=None, alpha=None,
@@ -843,19 +1059,28 @@ def _add_fit_inset(ax, curve_data, colors, x_transform=None, alpha=None,
         return
 
     p_arr = np.array(params, dtype=float)
-    slopes_arr = np.array(slopes, dtype=float)  # d(log10 τ)/dv per file
+    slopes_arr = np.array(slopes, dtype=float)  # d(log10 τ)/d(plotted x) per file
     if is_vary_v and xr:
-        # Fit: τ_mem = exp((βJ)^a · v · s)  ⇒  log10(τ) = ((βJ)^a · s / ln 10) · v.
-        # slopes_arr = d(log10 τ)/dv, so s = slope · ln 10 / (βJ)^a. The inset
-        # x-axis is (βJ)^a as well, so a slope-independent (i.e. constant) s
-        # corresponds to a flat horizontal line under the right choice of `a`.
+        # v-sweep + xr: each file has fixed p. Fit τ = exp((βJ)^a · v · s),
+        # with plotted x = v ⇒ d(log10 τ)/dv = ((βJ)^a · s) / ln 10 per file,
+        # i.e. s = slope · ln 10 / (βJ)^a. Inset x-axis is (βJ)^a so a flat
+        # line means the (βJ)^a · v scaling holds.
         a_fit = a_for_inset if a_for_inset is not None else 2.0
         bj_a = np.abs(np.log(p_arr)) ** a_fit   # |βJ|^a since βJ = −log p > 0
         inset_x = bj_a
         slopes_arr = slopes_arr * np.log(10.0) / bj_a
-        # Render the exponent compactly: 2 → "2", 1.5 → "1.5".
         a_str = f"{a_fit:g}"
         inset_xlabel = rf'$(\beta J)^{{{a_str}}}$'
+    elif (not is_vary_v) and xr:
+        # p-sweep + xr: each file has fixed v. Plotted x = (βJ)^a, so the fit
+        # τ = exp(s · v · (βJ)^a) gives d(log10 τ)/d(βJ)^a = s·v/ln 10 per
+        # file, i.e. s = slope · ln 10 / v. Inset x-axis is v, so different
+        # files (different v) give one data point each; a flat curve means
+        # the same fit constant s describes every v.
+        v_arr = p_arr  # `params` here are the fixed v values per file
+        inset_x = v_arr
+        slopes_arr = slopes_arr * np.log(10.0) / v_arr
+        inset_xlabel = r'$v$'
     elif is_vary_v:
         # Each file has a fixed p; inset x is e^(beta J) = p or (beta J)^alpha.
         if alpha is not None:
@@ -940,7 +1165,8 @@ def _add_mixing_inset(ax, curve_data, colors):
     inset.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
 
 
-def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
+def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False,
+                     fitrange=None, residuals=False):
     """Plot mixing time vs p, with each file (different v or L) as a separate curve.
 
     If alpha is given (p-sweeps only), transform x = p to
@@ -951,9 +1177,10 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
     s vs the file-level fixed parameter (v on p-sweeps; e^(beta J) or
     (beta J)^alpha on v-sweeps).
     """
-    fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    _want_res = (fitrange is not None) and residuals
+    fig, ax, residual_ax = _setup_residual_axes(_want_res)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    colors = _user_or(cmap)(np.linspace(0, 1, max(len(filenames), 2)))
 
     xlabel = None
     is_vary_v = None
@@ -962,6 +1189,9 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
     def _xtransform(x):
         # Convention p = exp(-β J) ⇒ β J = -log(p). Raise (β J)^α.
         return (-np.log(x)) ** alpha if alpha is not None else x
+
+    if fitrange is not None:
+        print(f"Per-file linear fits ln(y) ~ x over upper {(1.0 - float(fitrange)) * 100:.0f}% of x:")
 
     for idx, filename in enumerate(filenames):
         data = load_jld2_data(filename)
@@ -1002,10 +1232,16 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
                 curve_data.append((x_values, np.log10(mean_mixing_times), v, False, idx))
 
         x_plot = _xtransform(x_values) if (not is_vary_v) else x_values
-        ax.plot(x_plot, mean_mixing_times, '-o', color=colors[idx],
+        ax.plot(x_plot, mean_mixing_times, 'o', color=colors[idx],
                 markerfacecolor=colors[idx], markeredgecolor='k',
-                markersize=marker_size, linewidth=linewidth, alpha=0.7,
+                markersize=marker_size, linewidth=0, alpha=1.0,
                 label=label)
+
+        if fitrange is not None:
+            _do_fitrange_fit(ax, np.asarray(x_plot),
+                             np.asarray(mean_mixing_times),
+                             fitrange, label, filename,
+                             residual_ax=residual_ax, color=colors[idx])
 
     if inset and len(curve_data) > 1 and alpha is None and not fit_inset:
         _add_mixing_inset(ax, curve_data, colors)
@@ -1025,17 +1261,19 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False):
     legend_title = None
     if inset and is_vary_v is not None:
         legend_title = r'$p$' if is_vary_v else r'$v$'
-    ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9,
-              title=legend_title)
+    _legend_no_errorbars(ax, loc=_legloc(), frameon=not True, fancybox=False,
+                         edgecolor='black', framealpha=0.9, title=legend_title)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
-    plt.tight_layout()
+    if not _finalize_residual_panel(ax, residual_ax):
+        plt.tight_layout()
     plt.show()
 
 
 def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
                   fit_inset=False, mixing_overlay=None, anchor_normalize=False,
-                  xlogsqq=False, xq=False, xp=False, xr=False):
+                  xlogsqq=False, xq=False, xp=False, xr=False, fitrange=None,
+                  residuals=False):
     """Plot FFS mixing time vs p or v, with exp(L*beta) reference line.
 
     If ploglog is True, plot log10(tau) (rather than tau) on a log y-axis
@@ -1083,20 +1321,21 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
         print("Warning: --xlogsqq/--xq/--xp/--xr are ignored with --ploglog.")
         xlogsqq = xq = xp = xr = False
         _new_xform = False
-    # Capture --a for the fit-inset exponent before the precedence rule nulls
-    # it. Under --xr + --fit_inset, --a overrides the default fit-inset
-    # exponent (2) so the fit form becomes τ = exp((βJ)^a · v · s) instead of
-    # exp((βJ)^2 · v · s). For --a in any other combo, the standard precedence
-    # warning applies (--a is ignored for the main-plot x-transform).
-    a_for_inset = a_exp if (xr and fit_inset and a_exp is not None) else None
-    if _new_xform and (alpha is not None or a_exp is not None):
-        if a_for_inset is not None and alpha is None:
-            print(f"Note: --xr controls the main-plot x-axis; --a={a_exp:g} is "
-                  "used as the fit-inset exponent in τ = exp((βJ)^a · v · s).")
-        else:
-            print("Warning: --xlogsqq/--xq/--xp/--xr take precedence over --alpha/--a.")
+    # Under --xr, --a controls the *exponent* of the (βJ)-axis transform:
+    # main-plot x-axis becomes (βJ)^a instead of the default (βJ)^2, and the
+    # fit-inset (when --fit_inset is set) uses the same exponent in
+    # τ = exp((βJ)^a · v · s). For non-xr "shorthand" transforms (xlogsqq, xq,
+    # xp), --a is still incompatible and gets dropped with a warning.
+    if _new_xform and alpha is not None:
+        print("Warning: --xlogsqq/--xq/--xp/--xr take precedence over --alpha.")
         alpha = None
+    if _new_xform and a_exp is not None and not xr:
+        print("Warning: --xlogsqq/--xq/--xp take precedence over --a "
+              "(only --xr accepts --a as an exponent override).")
         a_exp = None
+    elif xr and a_exp is not None:
+        print(f"Note: --xr + --a={a_exp:g} → plotting against (βJ)^{a_exp:g} "
+              "(both main axis and fit-inset).")
 
     def _xtransform(x):
         # Convention p = exp(-β J) ⇒ β J = -log(p). Raise (β J)^α.
@@ -1107,7 +1346,9 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
         if xp:
             return x
         if xr:
-            return (-np.log(x)) ** 2
+            # --a overrides the default exponent (2) when given.
+            a_xr = 2.0 if a_exp is None else a_exp
+            return (-np.log(x)) ** a_xr
         if alpha is not None:
             return (-np.log(x)) ** alpha
         if a_exp is not None:
@@ -1140,16 +1381,21 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
             n_ok_str = ""
         print(f"  {fn}: {nreq_str}, {budget}{n_ok_str}")
 
-    fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
+    _want_res = (fitrange is not None) and residuals and not ploglog
+    fig, ax, residual_ax = _setup_residual_axes(_want_res)
     ax.minorticks_off()
-    # When any file in the set is a v-sweep, use Oranges (sliced away from the
-    # pale low and saturated high ends so the lightest curve is still visible
-    # on a white background). Otherwise keep the GKL/coolwarm default.
+    # Colormap by sweep type:
+    #   v-sweep (x = v):                       Oranges
+    #   p-sweep (x = temperature-like; p, ε, (βJ)^a, ...):  Blues
+    # Both are sliced [0.35, 0.95] so the lightest curve is still legible on
+    # a white background and the darkest doesn't crush to black.
     _any_vary_v = any(load_jld2_data(fn).get('vs') is not None for fn in filenames)
-    if _any_vary_v:
+    if _USER_CMAP is not None:
+        colors = _USER_CMAP(np.linspace(0.35, 0.95, max(len(filenames), 2)))
+    elif _any_vary_v:
         colors = plt.cm.Oranges(np.linspace(0.35, 0.95, max(len(filenames), 2)))
     else:
-        colors = _pick_cmap(filenames)(np.linspace(0, 1, max(len(filenames), 2)))
+        colors = plt.cm.Blues(np.linspace(0.35, 0.95, max(len(filenames), 2)))
 
     # Per-FFS-file multiplicative rescale so that the FFS τ at the smallest x
     # value matches the direct (mixing-overlay) τ at the same x. Only takes
@@ -1192,6 +1438,11 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
     xlabel = None
     is_vary_v = None
     curve_data = []
+
+    if fitrange is not None and ploglog:
+        print("Warning: --fitrange is ignored with --ploglog (y-axis is already log10(tau)).")
+    if fitrange is not None and not ploglog:
+        print(f"Per-file linear fits ln(y) ~ x over upper {(1.0 - float(fitrange)) * 100:.0f}% of x:")
 
     for idx, filename in enumerate(filenames):
         data = load_jld2_data(filename)
@@ -1314,15 +1565,15 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
 
             if has_std:
                 ax.errorbar(x_values[mask], y_vals[mask], yerr=yerr,
-                            fmt='-o', color=colors[idx],
+                            fmt='o', color=colors[idx],
                             markerfacecolor=colors[idx], markeredgecolor='k',
-                            markersize=_ms, linewidth=linewidth,
-                            alpha=0.7, capsize=3, label=label)
+                            markersize=_ms, linewidth=0,
+                            alpha=1.0, capsize=3, label=label)
             else:
-                ax.plot(x_values[mask], y_vals[mask], '-o', color=colors[idx],
+                ax.plot(x_values[mask], y_vals[mask], 'o', color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=_ms, linewidth=linewidth,
-                        alpha=0.7, label=label)
+                        markersize=_ms, linewidth=0,
+                        alpha=1.0, label=label)
             if np.any(mask):
                 max_mixing_time = max(max_mixing_time, float(np.max(y_vals[mask])))
             continue
@@ -1335,15 +1586,22 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
             ax.errorbar(x_plot[mask], mean_mixing_times[mask],
                         yerr=[mean_mixing_times[mask] - tau_lower[mask],
                               tau_upper[mask] - mean_mixing_times[mask]],
-                        fmt='-o', color=colors[idx],
+                        fmt='o', color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=_ms, linewidth=linewidth, alpha=0.7,
+                        markersize=_ms, linewidth=0, alpha=1.0,
                         capsize=3, label=label)
         else:
-            ax.plot(x_plot[finite_mask], mean_mixing_times[finite_mask], '-o', color=colors[idx],
+            ax.plot(x_plot[finite_mask], mean_mixing_times[finite_mask], 'o', color=colors[idx],
                     markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=_ms, linewidth=linewidth, alpha=0.7,
+                    markersize=_ms, linewidth=0, alpha=1.0,
                     label=label)
+
+        if fitrange is not None:
+            _do_fitrange_fit(ax,
+                             np.asarray(x_plot)[finite_mask],
+                             np.asarray(mean_mixing_times)[finite_mask],
+                             fitrange, label, filename,
+                             residual_ax=residual_ax, color=colors[idx])
 
         if np.any(finite_mask):
             max_mixing_time = max(max_mixing_time, np.max(mean_mixing_times[finite_mask]))
@@ -1363,7 +1621,7 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
     if fit_inset and not ploglog and len(curve_data) >= 1:
         _add_fit_inset(ax, curve_data, colors,
                        x_transform=(_xtransform if (is_vary_v is False) else (lambda x: x)),
-                       alpha=alpha, xr=xr, a_for_inset=a_for_inset)
+                       alpha=alpha, xr=xr, a_for_inset=a_exp)
 
     # Mixing-mode overlay (direct-trajectory benchmark): scatter, no fit.
     if mixing_overlay:
@@ -1402,7 +1660,8 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
         elif xq:
             ax.set_xlabel(rf'$1/{_xsym}$')
         elif xr:
-            ax.set_xlabel(r'$(\beta J)^2$')
+            a_xr = 2.0 if a_exp is None else a_exp
+            ax.set_xlabel(rf'$(\beta J)^{{{a_xr:g}}}$')
         else:  # xp
             ax.set_xlabel(base_xlabel)
     elif alpha is not None and not is_vary_v:
@@ -1417,11 +1676,21 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
         dynamics_set |= set(load_jld2_data(fn).get('dynamics') for fn in mixing_overlay)
     any_gkl = 'gkl' in dynamics_set
     any_ig = 'ising_glauber' in dynamics_set
+    # Seeded runs estimate a modified (clock-truncated) τ_mem; mark it with a
+    # tilde. Trigger if ANY input file used non-zero seeding — mixed-seeding
+    # plots are visually misleading but at least the label flags the issue.
+    _any_seeded = any(
+        (load_jld2_data(fn).get('seed_droplet_size') or 0) > 0
+        for fn in filenames
+    )
+    _tmem_sym = r't_{\sf mem}'
+    if _any_seeded:
+        _tmem_sym = r'\widetilde ' + _tmem_sym
     if ploglog:
-        ax.set_ylabel(r'$\log_{10} t_{\sf mem}$')
+        ax.set_ylabel(rf'$\log_{{10}} {_tmem_sym}$')
         ax.set_xscale('log')
     else:
-        ax.set_ylabel(r'$t_{\sf mem}$')
+        ax.set_ylabel(rf'${_tmem_sym}$')
     if not any_ig:
         ax.set_yscale('log')
     legend_title = None
@@ -1439,8 +1708,14 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
             legend_title = r'$\eta$'
         else:
             legend_title = r'$v$'
-    leg = ax.legend(loc='best', frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9,
-                    title=legend_title)
+    # Translucent white legend background (matches the erosion-vs-v style):
+    # white fill at α≈0.5 so legend text is readable when overlapping curves
+    # without fully obscuring what's behind it.
+    leg = _legend_no_errorbars(ax, loc=_legloc(), frameon=True, fancybox=False,
+                               edgecolor='none', framealpha=0.5,
+                               title=legend_title)
+    leg.get_frame().set_facecolor('white')
+    leg.get_frame().set_linewidth(0)
     if leg.get_title():
         leg.get_title().set_fontsize(13 * 1.2)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
@@ -1459,7 +1734,8 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
                 ax.set_xticks(list(range(lo, hi + 1)))
         except Exception:
             pass
-    plt.tight_layout()
+    if not _finalize_residual_panel(ax, residual_ax):
+        plt.tight_layout()
     plt.show()
 
 
@@ -1478,7 +1754,7 @@ def plot_diffusion_mode(filenames):
     """
     fig, ax = plt.subplots(figsize=(4., 4.), dpi=100)
     ax.minorticks_off()
-    colors = cmap(np.linspace(0, 1, max(len(filenames), 2)))
+    colors = _user_or(cmap)(np.linspace(0, 1, max(len(filenames), 2)))
 
     xlabel = None
     ylabel = r'$D(\epsilon)$'
@@ -1528,7 +1804,7 @@ def plot_diffusion_mode(filenames):
     ax.set_xlabel(xlabel or r'$\epsilon$')
     ax.set_ylabel(ylabel)
     ax.set_yscale('log')
-    ax.legend(loc='best', frameon=not True, fancybox=False,
+    ax.legend(loc=_legloc(), frameon=not True, fancybox=False,
               edgecolor='black', framealpha=0.9)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
@@ -1597,6 +1873,50 @@ def plot_history_mode(filenames, t_max=None, hide_ticks=False):
         cbar.ax.tick_params(labelsize=10)
         cbar.ax.yaxis.set_major_formatter(mathsf_fmt)
         cbar.ax.minorticks_off()
+
+        # Custom v±δ arrow overlay for the specific (L=200, v=2, β=200) file
+        # the user hand-annotated. The two "V" markers identify pairs of
+        # domain walls travelling at slightly different velocities relative
+        # to the co-moving frame; v-δ (slow) is the red one at the trajectory
+        # base, v+δ (fast) is the purple one further up. Coordinates are in
+        # data units (x: site index, t: time step).
+        try:
+            # int()/float() coerce both Python and numpy scalars; the bare
+            # isinstance(L, (int, float)) check from earlier missed numpy
+            # scalars (e.g. np.int64) returned by h5py.
+            L_int = int(L)
+            v_val = float(v)
+            beta_val_f = float(beta_val)
+            if (L_int == 200 and abs(v_val - 2.0) < 1e-6
+                    and abs(beta_val_f - 200.0) < 1e-6):
+                red_hex = '#FF0A29'
+                purple_hex = '#DC35FF'
+                arrow_kw = dict(arrowstyle='-|>', mutation_scale=15, lw=3)
+                label_fs = 14 * 1.5
+                # Bold math: \boldsymbol works via the rcParams text.usetex=True
+                # path at the top of this script; matplotlib's mathtext doesn't
+                # honour weight='bold' for math italic + Greek without it.
+                # Falls back to plain italic if LaTeX isn't available (which
+                # would just render as non-bold, not error out).
+                # Lower V — red, v-δ pair. Vertex at (75, 0).
+                ax.annotate('', xy=(56, 30), xytext=(75, 0),
+                            arrowprops=dict(color=red_hex, **arrow_kw))
+                ax.annotate('', xy=(91, 30), xytext=(75, 0),
+                            arrowprops=dict(color=red_hex, **arrow_kw))
+                # Label horizontally offset to x=65 (left of the vertex, above
+                # the left arm's tip) and just above the arrow tips.
+                ax.text(65, 33, r'$\boldsymbol{v - \delta}$', color=red_hex,
+                        fontsize=label_fs, ha='center', va='bottom')
+                # Upper V — purple, v+δ pair. Vertex at (102, 52).
+                ax.annotate('', xy=(62, 79), xytext=(102, 52),
+                            arrowprops=dict(color=purple_hex, **arrow_kw))
+                ax.annotate('', xy=(140, 79), xytext=(102, 52),
+                            arrowprops=dict(color=purple_hex, **arrow_kw))
+                ax.text(102, 82, r'$\boldsymbol{v + \delta}$', color=purple_hex,
+                        fontsize=label_fs, ha='center', va='bottom')
+        except Exception:
+            pass
+
         plt.tight_layout()
         plt.show()
 
@@ -1618,7 +1938,7 @@ def plot_phase_diagram_mode(filenames, raw=False, pmin=None, pmax=None,
         observable = data.get('observable', 'mixing')
 
         _, ax = plt.subplots(figsize=(5., 4.), dpi=100)
-        colors = cmap(np.linspace(0, 1, max(len(p_values), 2)))
+        colors = _user_or(cmap)(np.linspace(0, 1, max(len(p_values), 2)))
         ylab = r'$t_{\sf mem}$' if observable == 'mixing' else r'$\ell_c$'
         for i, p in enumerate(p_values):
             ax.plot(v_values, y_matrix[i, :], '-o', color=colors[i],
@@ -1631,7 +1951,7 @@ def plot_phase_diagram_mode(filenames, raw=False, pmin=None, pmax=None,
         ax.set_ylabel(ylab)
         if observable == 'mixing':
             ax.set_yscale('log')
-        leg = ax.legend(loc='best', frameon=False, title=r'$p$')
+        leg = ax.legend(loc=_legloc(), frameon=False, title=r'$p$')
         if leg.get_title():
             leg.get_title().set_fontsize(13 * 1.2)
         ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
@@ -1692,12 +2012,12 @@ def plot_phase_diagram_mode(filenames, raw=False, pmin=None, pmax=None,
 
     # Annotations — positioned relative to the final axis bounds (after the
     # user's pmin/pmax/vmin/vmax have been applied), in axes-fraction coords.
-    ax.text(0.72, 0.7, r'$t_{\sf mem} \sim e^{\beta J v e^{\beta J}}$',
-            transform=ax.transAxes, ha='center', va='center', fontsize=13)
+    ax.text(0.66, 0.78, r'$t_{\sf mem} \sim e^{v (\beta J)^2 \ln v}$',
+            transform=ax.transAxes, ha='center', va='center', fontsize=13 * 0.9)
     ax.text(0.07, 0.1, r'$t_{\sf mem} \sim e^{\beta J}$',
             transform=ax.transAxes, ha='left', va='center', fontsize=13)
 
-    ax.set_xlabel(r'$p$')
+    ax.set_xlabel(r'$e^{\beta J}$')
     ax.set_ylabel(r'$v$')
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
@@ -1776,8 +2096,59 @@ def main():
     parser.add_argument('--yscale', choices=['linear', 'log'], default=None,
                         help='Force the y-axis scale to linear or log on every '
                              'figure produced this run, overriding all other defaults.')
+    parser.add_argument('--cmap', type=str, default=None,
+                        help='Override the per-file colormap with the named '
+                             'matplotlib colormap (e.g. "viridis", "magma", '
+                             '"Greens"). Replaces the default coolwarm_r / '
+                             'rainbow / Oranges / Blues choices for every '
+                             'plot mode that colours multiple files.')
+    parser.add_argument('--legloc', type=str, default=None,
+                        help='Force the legend location on every figure '
+                             '(e.g. "upper left", "lower center", '
+                             '"center right"). Overrides the default '
+                             '"best" / "lower right" choices in every '
+                             'plot mode.')
+    parser.add_argument('--fitrange', type=float, default=None,
+                        help='ffs / mixing / energy mode: per-file linear fit '
+                             'of ln(y) to the plotted x-coordinate over the '
+                             'upper (1 - fitrange) portion of x (e.g. '
+                             '--fitrange=0.2 fits on x >= x_min + 0.2*(x_max '
+                             '- x_min), i.e. the last 80 percent). Honours '
+                             '--a / --alpha / --xr / --xq / --xp / --xlogsqq '
+                             '(fitted x is whatever is on-screen). Prints '
+                             'slope, intercept, stderrs, R^2, and n per file '
+                             'and overlays each fit as a black dashed line. '
+                             'Ignored with --ploglog.')
+    parser.add_argument('--residuals', action='store_true',
+                        help='Companion to --fitrange. Swap the figure for a '
+                             'two-panel gridspec (3:1) with the data + fit '
+                             'lines on top and per-file residuals ln(y) - '
+                             '(slope*x + intercept) on the bottom panel. '
+                             'Residuals are shown for ALL plotted points '
+                             '(including those outside the fit window) so '
+                             'systematic curvature outside the fit window is '
+                             'visible. No-op without --fitrange.')
 
     args = parser.parse_args()
+
+    if args.residuals and args.fitrange is None:
+        print("Warning: --residuals is a no-op without --fitrange; ignoring.")
+        args.residuals = False
+
+    # Apply the --cmap override (if any) before any plot function runs. Sites
+    # that pick per-file colors consult _USER_CMAP via _user_or().
+    if args.cmap is not None:
+        global _USER_CMAP
+        try:
+            _USER_CMAP = plt.get_cmap(args.cmap)
+        except (ValueError, KeyError) as e:
+            print(f"Warning: unknown colormap '{args.cmap}'; ignoring --cmap. ({e})")
+
+    # Apply the --legloc override (if any). Every ax.legend() site below
+    # consults _USER_LEGLOC via _legloc().
+    if args.legloc is not None:
+        global _USER_LEGLOC
+        _USER_LEGLOC = args.legloc
 
     # Global axis-scale override: monkey-patch plt.show so that every figure
     # produced by any plot function has its scales forced to the requested
@@ -1820,23 +2191,27 @@ def main():
                       a_exp=args.a, alpha=args.alpha, fit_inset=args.fit_inset,
                       mixing_overlay=mixing_files,
                       anchor_normalize=args.anchor_normalize,
-                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr)
+                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr,
+                      fitrange=args.fitrange, residuals=args.residuals)
         return
 
     if mode == 'erosion_test':
         plot_erosion_mode(args.files, raw=args.raw, small_stats=args.small_stats,
                           fit_inset=args.fit_inset, logy=args.logy)
     elif mode == 'energy':
-        plot_energy_mode(args.files, heat=args.heat)
+        plot_energy_mode(args.files, heat=args.heat, fitrange=args.fitrange,
+                         residuals=args.residuals)
     elif mode == 'teff':
         plot_teff_mode(args.files)
     elif mode == 'mixing':
         plot_mixing_mode(args.files, inset=args.inset, alpha=args.alpha,
-                         fit_inset=args.fit_inset)
+                         fit_inset=args.fit_inset, fitrange=args.fitrange,
+                         residuals=args.residuals)
     elif mode == 'ffs':
         plot_ffs_mode(args.files, inset=args.inset, ploglog=args.ploglog,
                       a_exp=args.a, alpha=args.alpha, fit_inset=args.fit_inset,
-                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr)
+                      xlogsqq=args.xlogsqq, xq=args.xq, xp=args.xp, xr=args.xr,
+                      fitrange=args.fitrange, residuals=args.residuals)
     elif mode == 'history':
         plot_history_mode(args.files, t_max=args.t_max, hide_ticks=args.hide_ticks)
     elif mode == 'phase_diagram':

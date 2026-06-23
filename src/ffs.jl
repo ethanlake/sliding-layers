@@ -27,7 +27,7 @@ function measure_initial_flux(L::Int, beta::Float64, h::Float64, v::Float64,
                                n_configs::Int, max_time::Int;
                                single_layer::Bool=false, verbose::Bool=false,
                                seed_droplet_size::Int=0,
-                               randshift::Bool=false)
+                               randshift::Bool=true)
     n_threads = Threads.nthreads()
     configs_per_thread = cld(n_configs, n_threads)
 
@@ -118,7 +118,7 @@ function measure_crossing_probability(L::Int, beta::Float64, h::Float64, v::Floa
                                        lambda_target::Float64, lambda_fail::Float64,
                                        max_time_per_trial::Int, n_configs::Int;
                                        single_layer::Bool=false,
-                                       randshift::Bool=false)
+                                       randshift::Bool=true)
     success_configs = FFSConfig[]
     total_successes = 0
     total_trials = 0
@@ -208,7 +208,7 @@ function probe_next_interface(L::Int, beta::Float64, h::Float64, v::Float64,
                                M_threshold::Float64,
                                max_time::Int, n_probe::Int, target_prob::Float64;
                                single_layer::Bool=false,
-                               randshift::Bool=false)
+                               randshift::Bool=true)
     min_mags = zeros(Float64, n_probe)
     probes_done = Threads.Atomic{Int}(0)
     n_timeouts = Threads.Atomic{Int}(0)
@@ -264,7 +264,7 @@ the dynamics before we sample.
 function measure_metastable_magnetization(L::Int, beta::Float64, h::Float64, v::Float64;
                                            single_layer::Bool=false,
                                            seed_droplet_size::Int=0,
-                                           randshift::Bool=false)
+                                           randshift::Bool=true)
     # T_sample scaling: at low T the droplet relaxation time grows like exp(2βJ).
     # Clamp at 10 (the historical hardcoded value) on the low end and at 10⁵ on
     # the high end so we don't blow up wall-clock on a diagnostic measurement.
@@ -307,7 +307,7 @@ function ffs_single_run(L::Int, beta::Float64, h::Float64, v::Float64,
                          n_interfaces::Int=0,
                          single_layer::Bool=false, verbose::Bool=false,
                          seed_droplet_size::Int=0,
-                         randshift::Bool=false)
+                         randshift::Bool=true)
     # Phase 0: Initial flux. Seeding only meaningfully affects Phase 0 (and the
     # metastable λ₀ measurement upstream); the per-phase trial trajectories at
     # k > 0 start from saved non-all-+ configs and terminate at m_fail well
@@ -437,8 +437,9 @@ function run_ffs_mode(; L::Int, v::Float64, h::Float64, p::Float64,
                        single_layer::Bool=false,
                        lambda_0_override::Float64=NaN,
                        seed_droplet_size::Int=0,
-                       randshift::Bool=false,
+                       randshift::Bool=true,
                        sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
+                       _checkpoint_adj::Union{Nothing,String}=nothing,
                        kwargs...)
     t_start = time()
     h = -abs(h)
@@ -508,13 +509,66 @@ function run_ffs_mode(; L::Int, v::Float64, h::Float64, p::Float64,
     println("Threads: $(Threads.nthreads())")
 
     n_sweep = length(sweep_values)
-    mean_mixing_times = zeros(Float64, n_sweep)
-    log_mixing_times = zeros(Float64, n_sweep)
-    log_mixing_times_std = zeros(Float64, n_sweep)
-    flux_rates = zeros(Float64, n_sweep)
-    per_run_log_taus = fill(NaN, n_sweep, n_repeats)  # NaN entries = failed runs
+    # NaN-initialised so the plotter can mask incomplete sweep points after a
+    # crash. The arrays below are pre-allocated, the results dict is built
+    # early, and we dump it to disk after each sweep-point completes.
+    mean_mixing_times = fill(NaN, n_sweep)
+    log_mixing_times = fill(NaN, n_sweep)
+    log_mixing_times_std = fill(NaN, n_sweep)
+    flux_rates = fill(NaN, n_sweep)
+    per_run_log_taus = fill(NaN, n_sweep, n_repeats)  # NaN entries = failed run / not yet attempted
     L_values = fill(L, n_sweep)        # per sweep point; constant L unless adaptive_L
     lc_values = fill(0, n_sweep)        # per sweep point; 0 means not measured
+
+    # Build the results dict early so we can dump it after each sweep point.
+    # Same key set as the final save at the bottom; arrays are stored by
+    # reference, so mutating them in the loop also mutates this dict.
+    results = Dict{String, Any}(
+        "mean_mixing_times" => mean_mixing_times,
+        "log_mixing_times" => log_mixing_times,
+        "log_mixing_times_std" => log_mixing_times_std,
+        "per_run_log_taus" => per_run_log_taus,
+        "flux_rates" => flux_rates,
+        "L" => L, "h" => h,
+        "n_configs_per_run" => n_configs_per_run, "n_repeats" => n_repeats,
+        "M_threshold" => M_threshold,
+        "target_crossing_prob" => target_crossing_prob,
+        "n_interfaces" => n_interfaces,
+        "adaptive_L" => adaptive_L,
+        "adaptive_factor" => adaptive_factor,
+        "seed_droplet_size" => seed_droplet_size,
+        "randshift" => randshift,
+        "L_values" => L_values,
+        "lc_values" => lc_values,
+        "elapsed_seconds" => 0.0,   # overwritten on full completion
+    )
+    if single_layer
+        results["p_values"] = sweep_values
+        results["single_layer"] = true
+    elseif vary_v
+        results["vs"] = sweep_values
+        results["p"] = p_fixed
+    else
+        results["p_values"] = sweep_values
+        results["v"] = v
+    end
+
+    # Checkpoint path: pre-compute it so we write to the same JLD2 each time.
+    # _checkpoint_adj == nothing means caller asked us not to checkpoint (e.g.
+    # save=false at the CLI). Otherwise it's the --adj suffix (possibly empty).
+    # Dump an immediate skeleton (all-NaN arrays + full metadata) so the user
+    # has a recognisable output file even if no sweep point finishes before a
+    # crash.
+    ckpt_path = nothing
+    if _checkpoint_adj !== nothing
+        if !isdir("data"); mkdir("data"); end
+        ckpt_path = build_filename("ffs", results)
+        if !isempty(_checkpoint_adj)
+            ckpt_path = replace(ckpt_path, ".jld2" => "$(_checkpoint_adj).jld2")
+        end
+        @printf("Checkpointing to %s after each sweep point.\n", ckpt_path)
+        jldsave(ckpt_path; (Symbol(k) => v for (k, v) in results)...)
+    end
 
     # Adaptive-L: warm-start the erosion search from min_erosion_length;
     # subsequent sweep points start near the previous lc.
@@ -659,6 +713,13 @@ function run_ffs_mode(; L::Int, v::Float64, h::Float64, p::Float64,
             @printf("  %d/%d runs succeeded: log₁₀(τ) = %.2f ± %.2f (τ ≈ %.4e)\n",
                     n_ok, n_repeats, mean_log, std_log, 10.0^mean_log)
         end
+
+        # Periodic checkpoint after each sweep point. Loop is serial so no
+        # lock is needed. A crash mid-sweep loses at most the in-flight point.
+        if ckpt_path !== nothing
+            results["elapsed_seconds"] = time() - t_start
+            jldsave(ckpt_path; (Symbol(k) => v for (k, v) in results)...)
+        end
     end
 
     elapsed = time() - t_start
@@ -667,35 +728,6 @@ function run_ffs_mode(; L::Int, v::Float64, h::Float64, p::Float64,
     s_part = rem(elapsed, 60)
     @printf("\nDone! Elapsed: %dh %02dm %05.2fs (%.1f s total)\n",
             h_part, m_part, s_part, elapsed)
-
-    results = Dict{String, Any}(
-        "mean_mixing_times" => mean_mixing_times,
-        "log_mixing_times" => log_mixing_times,
-        "log_mixing_times_std" => log_mixing_times_std,
-        "per_run_log_taus" => per_run_log_taus,  # (n_sweep × n_repeats); NaN = failed run
-        "flux_rates" => flux_rates,
-        "L" => L, "h" => h,
-        "n_configs_per_run" => n_configs_per_run, "n_repeats" => n_repeats,
-        "M_threshold" => M_threshold,
-        "target_crossing_prob" => target_crossing_prob,
-        "n_interfaces" => n_interfaces,
-        "adaptive_L" => adaptive_L,
-        "adaptive_factor" => adaptive_factor,
-        "seed_droplet_size" => seed_droplet_size,
-        "randshift" => randshift,
-        "L_values" => L_values,
-        "lc_values" => lc_values,
-        "elapsed_seconds" => elapsed,
-    )
-    if single_layer
-        results["p_values"] = sweep_values
-        results["single_layer"] = true
-    elseif vary_v
-        results["vs"] = sweep_values
-        results["p"] = p_fixed
-    else
-        results["p_values"] = sweep_values
-        results["v"] = v
-    end
+    results["elapsed_seconds"] = elapsed
     return results
 end

@@ -212,7 +212,7 @@ Time convention:
 - Measurements occur at every integer time (every L MC updates).
 """
 function evolve_and_measure!(state::SimulationState, T_steps::Int, on_measure::Function;
-                              seed_droplet_size::Int=0, randshift::Bool=false)
+                              seed_droplet_size::Int=0, randshift::Bool=true)
     v = state.v
     L = state.L
 
@@ -305,7 +305,7 @@ Calls on_measure(step, heat) where heat is the total energy change from
 accepted MC updates during that time step (L updates), normalized by 2L.
 """
 function evolve_and_measure_heat!(state::SimulationState, T_steps::Int, on_measure::Function;
-                                   randshift::Bool=false)
+                                   randshift::Bool=true)
     v = state.v
     L = state.L
 
@@ -369,7 +369,7 @@ Advance the simulation by T time units without taking measurements.
 Same time convention as `evolve_and_measure!`.
 """
 function evolve_time!(state::SimulationState, T::Int; seed_droplet_size::Int=0,
-                       randshift::Bool=false)
+                       randshift::Bool=true)
     v = state.v
     L = state.L
 

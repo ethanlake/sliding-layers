@@ -4,7 +4,16 @@
 Dispatch to the appropriate simulation mode and optionally save results to JLD2.
 """
 function run_simulation(mode::String; save::Bool=true, adj::String="", kwargs...)
-    kwargs_dict = Dict(kwargs)
+    # Use Symbol→Any so we can stuff heterogeneous values (the kwargs are
+    # numeric / Nothing / Bool, but we add a String checkpoint suffix below).
+    kwargs_dict = Dict{Symbol,Any}(kwargs)
+
+    # If saving, pass the --adj suffix into the long-running sweep modes so
+    # they can checkpoint partial results to the final filename after each
+    # sweep point. nothing means "don't checkpoint" (e.g. --save=false).
+    if save
+        kwargs_dict[:_checkpoint_adj] = adj
+    end
 
     results = if mode == "history"
         run_history_mode(; kwargs_dict...)

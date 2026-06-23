@@ -24,7 +24,7 @@ Modes:
 Time unit: one sweep = L single-spin updates (matches src/core.jl convention).
 
 Usage:
-  julia --project=. ising.jl --mode=history --L=200 --T_steps=300 --p=0.5 --show_plot=true
+  julia --project=. ising.jl --mode=history --L=200 --T_steps=300 --p=0.5
   julia --project=. -t auto ising.jl --mode=ffs --L=200 --p_min=0.35 --p_max=0.55 --n_steps=3 \
         --n_configs_per_run=50 --n_repeats=2 --M_threshold=0.75 --max_time_per_trial=200000
   julia --project=. -t auto ising.jl --mode=mixing --L=200 --q_min=1.8 --q_max=2.9 --n_steps=3 \
@@ -194,8 +194,7 @@ end
 ### =====================================================================
 
 function run_history_mode(; L::Int, p::Float64, T_steps::Int=500,
-                            init::String="all_plus",
-                            show_plot::Bool=false, kwargs...)
+                            init::String="all_plus", kwargs...)
     beta = -log(p)
     q = 1.0 / p
     println("=== 1D Ising Glauber: History Mode ===")
@@ -216,18 +215,6 @@ function run_history_mode(; L::Int, p::Float64, T_steps::Int=500,
         true
     end)
     println("Done!")
-
-    if show_plot
-        @eval Main using Plots
-        fig = Base.invokelatest(Plots.heatmap, history;
-                                c=:RdBu, clims=(-1.5, 1.5),
-                                xlabel="site", ylabel="t",
-                                title=@sprintf("Glauber 1D Ising L=%d, p=%.3f", L, p),
-                                size=(400, 700))
-        Base.invokelatest(display, fig)
-        println("Close the plot window (or press Enter) to exit...")
-        try readline() catch end
-    end
 
     return Dict{String, Any}(
         "magnetization_history" => history,
@@ -890,7 +877,6 @@ if mode == "history"
     p = 0.5  # corresponds to βJ ≈ 0.69; equivalently q ≈ 2, τ ≈ exp(1.9) ≈ 6.7
     T_steps = 500
     init = "all_plus"
-    show_plot = false
 elseif mode == "ffs"
     p_min = 0.33     # βJ ≈ 1.10 (rare); old q_min=50 ↦ p≈0.36 under exp(4βJ), new q_min=3.0
     p_max = 0.67     # βJ ≈ 0.40 (warm); old q_max=5 ↦ p≈0.67
@@ -932,7 +918,6 @@ if mode == "history"
     end
     T_steps = parse_arg("T_steps", T_steps)
     init = String(parse_arg("init", init))
-    show_plot = parse_arg("show_plot", show_plot)
 elseif mode == "ffs"
     L = parse_arg("L", L)
     n_steps = parse_arg("n_steps", n_steps)
@@ -962,7 +947,6 @@ if mode == "history"
     kwargs[:p] = p
     kwargs[:T_steps] = T_steps
     kwargs[:init] = init
-    kwargs[:show_plot] = show_plot
 elseif mode == "ffs"
     kwargs[:L] = L
     kwargs[:p_min] = p_min

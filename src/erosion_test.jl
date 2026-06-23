@@ -34,6 +34,8 @@ Display spacetime histories for domain sizes lc, 0.75*lc, and 1.25*lc
 Blocks until the user closes each figure before showing the next set.
 """
 function show_erosion_histories(lc::Int, beta::Float64, h::Float64, v::Float64)
+    # Plots.jl is a soft dependency: only loaded when --show_histories is on.
+    @eval Main using Plots
     for (scale, label) in [(1.0, "lc"), (0.75, "0.75·lc"), (1.25, "1.25·lc")]
         l = max(2, round(Int, scale * lc))
         L_sys = round(Int, 2 * l * (v + 1))
@@ -50,30 +52,29 @@ function show_erosion_histories(lc::Int, beta::Float64, h::Float64, v::Float64)
                     hist[t+1, :] = circshift(hist[t+1, :], -shift)
                 end
             end
-            p = Plots.heatmap(hist',
-                       c=:RdBu, clims=(-2, 2),
-                       xlabel="Site", ylabel="t",
-                       title="$label, trial $trial",
-                       aspect_ratio=:auto, size=(300, 600))
+            p = Base.invokelatest(Main.Plots.heatmap, hist';
+                                  c=:RdBu, clims=(-2, 2),
+                                  xlabel="Site", ylabel="t",
+                                  title="$label, trial $trial",
+                                  aspect_ratio=:auto, size=(300, 600))
             push!(plots, p)
         end
-        fig = Plots.plot(plots..., layout=(1, 3), size=(900, 600))
-        display(fig)
+        fig = Base.invokelatest(Main.Plots.plot, plots...; layout=(1, 3), size=(900, 600))
+        Base.invokelatest(display, fig)
         println("  Close the plot window to continue...")
         readline()
     end
 end
 
 """
-    plot_erode_vs_l(lc, beta, h, v, thresh_prob; doublon_mode)
+    plot_erode_vs_l(lc, beta, h, v, n_samples; doublon_mode)
 
-Plot shrinkage probability vs domain size l, for l in [lc/2, 3lc/2] with
-10 points and 200 samples each. Draws a horizontal line at thresh_prob.
-Blocks until the user closes the plot.
+Measure shrinkage probability vs domain size l, for l in [lc/5, lc] with
+~20 points and n_samples samples each. Returns (l_values, probs).
 """
 function plot_erode_vs_l(lc::Int, beta::Float64, h::Float64, v::Float64,
-                          thresh_prob::Float64, n_samples::Int;
-                          doublon_mode::Bool=false, show_plots::Bool=false,
+                          n_samples::Int;
+                          doublon_mode::Bool=false,
                           t_evolve_factor::Union{Nothing,Float64}=nothing,
                           L_sys_factor::Float64=1.0,
                           cache::Dict{Int,Float64}=Dict{Int,Float64}())
@@ -96,18 +97,6 @@ function plot_erode_vs_l(lc::Int, beta::Float64, h::Float64, v::Float64,
         push!(probs, sp)
     end
 
-    if show_plots
-        fig = Plots.plot(l_values, probs, seriestype=:scatter,
-                         xlabel="l", ylabel="shrink probability",
-                         title=@sprintf("lc = %d, β = %.3f, v = %.1f", lc, beta, v),
-                         legend=false, markersize=5, size=(500, 400))
-        Plots.hline!(fig, [thresh_prob], linestyle=:dash, color=:red, linewidth=1.5)
-        Plots.vline!(fig, [lc], linestyle=:dash, color=:gray, linewidth=1.0)
-        display(fig)
-        println("  Close the plot window to continue...")
-        readline()
-    end
-
     return (l_values, collect(probs))
 end
 
@@ -124,7 +113,6 @@ function run_erosion_test_mode(; v::Float64, h::Float64, p::Float64,
                                 erode_vs_l::Bool=false,
                                 first_passage_mode::Bool=false,
                                 min_doublons::Int=10,
-                                show_plots::Bool=false,
                                 sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
                                 kwargs...)
     h = -abs(h)
@@ -190,8 +178,8 @@ function run_erosion_test_mode(; v::Float64, h::Float64, p::Float64,
             push!(escape_l_data, ls)
             push!(escape_prob_data, eps)
         elseif erode_vs_l
-            (ls, ps) = plot_erode_vs_l(lc, beta_val, h, v_cur, thresh_prob, erosion_num_trials;
-                                       doublon_mode, show_plots, t_evolve_factor, L_sys_factor, cache=sp_cache)
+            (ls, ps) = plot_erode_vs_l(lc, beta_val, h, v_cur, erosion_num_trials;
+                                       doublon_mode, t_evolve_factor, L_sys_factor, cache=sp_cache)
             push!(erode_l_data, ls)
             push!(erode_prob_data, ps)
         end

@@ -157,7 +157,6 @@ if mode == "history"
     init = "domain"
     domain_start = 3L ÷ 8
     domain_end = 5L ÷ 8
-    show_plot = false
 elseif mode == "mixing"
     # Convention: p = exp(-β J), 0 < p ≤ 1 (rare-event regime at small p).
     L = 2000
@@ -197,7 +196,6 @@ elseif mode == "ffs"
     single_layer = false
     lambda_0_override = NaN
     seed_droplet_size = 0   # 0 = off; >0 = instantly inject a k-spin minority droplet on both chains whenever the state hits all-+ (modified-clock convention).
-    randshift = false       # if true, place top-chain shifts via a Poisson process at rate v instead of the deterministic Bresenham schedule. Removes integer-vs-half-integer artifacts in v sweeps.
 elseif mode == "energy"
     # Convention: p = exp(-β J), 0 < p ≤ 1.
     L = 2000
@@ -232,7 +230,6 @@ elseif mode == "teff"
     T_response = 0
     n_samples = 1
     single_layer = false
-    show_plots = false
 elseif mode == "erosion_test"
     # Convention: p = exp(-β J), 0 < p ≤ 1.
     v = 2.0
@@ -254,7 +251,6 @@ elseif mode == "erosion_test"
     L_sys_factor = 1.0  # multiplier on L_sys = 2*l*(v+1); for sanity checks
     first_passage_mode = false  # use variable-time first-passage escape measurement
     min_doublons = 10  # lower boundary for first-passage erode condition
-    show_plots = false
 elseif mode == "phase_diagram"
     # Convention: p = exp(-β J), 0 < p ≤ 1.
     L = 2000
@@ -277,7 +273,6 @@ elseif mode == "phase_diagram"
     min_erosion_length = 2
     doublon_mode = false
     # shared:
-    show_plots = false
     single_layer = false
 else
     error("Unknown mode: $mode. Use 'history', 'mixing', 'ffs', 'energy', 'teff', 'erosion_test', or 'phase_diagram'.")
@@ -286,6 +281,11 @@ end
 # Parse command-line overrides
 save = parse_arg("save", true)
 adj = String(parse_arg("adj", ""))
+# Global default: Poisson-process top-chain shifts (rate v). Removes the
+# integer-vs-half-integer v artifacts caused by the deterministic Bresenham
+# schedule when L/v is rational with a small denominator. Pass --randshift=false
+# to opt out (legacy Bresenham). Applies to every mode that drives MC dynamics.
+randshift = parse_arg("randshift", true)
 
 if mode == "history"
     L = parse_arg("L", L)
@@ -296,7 +296,6 @@ if mode == "history"
     init = String(parse_arg("init", init))
     domain_start = parse_arg("domain_start", 3L ÷ 8)
     domain_end = parse_arg("domain_end", 5L ÷ 8)
-    show_plot = parse_arg("show_plot", show_plot)
 elseif mode == "mixing"
     L = parse_arg("L", L)
     v = parse_arg("v", v)
@@ -334,14 +333,6 @@ elseif mode == "ffs"
     vary_v = parse_arg("vary_v", vary_v)
     n_repeats = parse_arg("n_repeats", n_repeats)
     n_configs_per_run = parse_arg("n_configs_per_run", n_configs_per_run)
-    # Backward compat: --n_configs is the deprecated total-budget knob.
-    # If given, derive n_configs_per_run = n_configs / n_repeats (the old behavior).
-    n_configs_legacy = parse_arg("n_configs", -1)
-    if n_configs_legacy > 0
-        n_configs_per_run = max(1, round(Int, n_configs_legacy / n_repeats))
-        @warn "--n_configs is deprecated; use --n_configs_per_run instead. " *
-              "Translating: n_configs_per_run = $(n_configs_legacy) ÷ $(n_repeats) = $(n_configs_per_run)"
-    end
     target_crossing_prob = parse_arg("target_crossing_prob", target_crossing_prob)
     n_interfaces = parse_arg("n_interfaces", n_interfaces)
     adaptive_L = parse_arg("adaptive_L", adaptive_L)
@@ -351,7 +342,6 @@ elseif mode == "ffs"
     single_layer = parse_arg("single_layer", single_layer)
     lambda_0_override = parse_arg("lambda_0", lambda_0_override)
     seed_droplet_size = parse_arg("seed_droplet_size", seed_droplet_size)
-    randshift = parse_arg("randshift", randshift)
     (p_min, p_max, p, sweep_values_override) = _resolve_pqtau_sliding(p_min, p_max, p, n_steps)
 elseif mode == "energy"
     L = parse_arg("L", L)
@@ -360,8 +350,15 @@ elseif mode == "energy"
     p = parse_arg("p", p)
     p_min = parse_arg("p_min", p_min)
     p_max = parse_arg("p_max", p_max)
-    v_min = parse_arg("v_min", v_min)
-    v_max = parse_arg("v_max", v_max)
+    # Same auto-detect trick as the ffs branch: if the user passed both --v_min
+    # and --v_max we infer they want a v-sweep, even without --vary_v=true.
+    _v_min_user = parse_arg("v_min", NaN)
+    _v_max_user = parse_arg("v_max", NaN)
+    v_min = isnan(_v_min_user) ? v_min : _v_min_user
+    v_max = isnan(_v_max_user) ? v_max : _v_max_user
+    if !isnan(_v_min_user) && !isnan(_v_max_user)
+        vary_v = true   # auto-infer; explicit --vary_v below still wins
+    end
     n_steps = parse_arg("n_steps", n_steps)
     vary_v = parse_arg("vary_v", vary_v)
     T_equil = parse_arg("T_equil", T_equil)
@@ -387,7 +384,6 @@ elseif mode == "teff"
     T_response = parse_arg("T_response", T_response)
     n_samples = parse_arg("n_samples", n_samples)
     single_layer = parse_arg("single_layer", single_layer)
-    show_plots = parse_arg("show_plots", show_plots)
 elseif mode == "erosion_test"
     v = parse_arg("v", v)
     h = parse_arg("h", h)
@@ -409,7 +405,6 @@ elseif mode == "erosion_test"
     L_sys_factor = parse_arg("L_sys_factor", L_sys_factor)
     first_passage_mode = parse_arg("first_passage_mode", first_passage_mode)
     min_doublons = parse_arg("min_doublons", min_doublons)
-    show_plots = parse_arg("show_plots", show_plots)
     (p_min, p_max, p, sweep_values_override) = _resolve_pqtau_sliding(p_min, p_max, p, n_steps)
 elseif mode == "phase_diagram"
     L = parse_arg("L", L)
@@ -429,7 +424,6 @@ elseif mode == "phase_diagram"
     thresh_prob = parse_arg("thresh_prob", thresh_prob)
     min_erosion_length = parse_arg("min_erosion_length", min_erosion_length)
     doublon_mode = parse_arg("doublon_mode", doublon_mode)
-    show_plots = parse_arg("show_plots", show_plots)
     single_layer = parse_arg("single_layer", single_layer)
     # phase_diagram has no fixed p; ignore returned p
     (p_min, p_max, _ignored_p, sweep_values_override) = _resolve_pqtau_sliding(p_min, p_max, NaN, n_p_steps)
@@ -445,6 +439,10 @@ end
 ### build kwargs and run ###
 
 kwargs = Dict{Symbol, Any}()
+# Global pass-through: every MC-driven mode (history/mixing/energy/ffs/teff/
+# erosion_test/phase_diagram) routes through evolve_*, which honours
+# randshift. Modes that don't drive MC just ignore the kwarg via kwargs....
+kwargs[:randshift] = randshift
 
 if mode == "history"
     kwargs[:L] = L
@@ -455,7 +453,6 @@ if mode == "history"
     kwargs[:init] = init
     kwargs[:domain_start] = domain_start
     kwargs[:domain_end] = domain_end
-    kwargs[:show_plot] = show_plot
 elseif mode == "mixing"
     kwargs[:L] = L
     kwargs[:v] = v
@@ -494,7 +491,6 @@ elseif mode == "ffs"
     kwargs[:single_layer] = single_layer
     kwargs[:lambda_0_override] = lambda_0_override
     kwargs[:seed_droplet_size] = seed_droplet_size
-    kwargs[:randshift] = randshift
     kwargs[:sweep_values_override] = sweep_values_override
 elseif mode == "energy"
     kwargs[:L] = L
@@ -530,7 +526,6 @@ elseif mode == "teff"
     kwargs[:T_response] = T_response
     kwargs[:n_samples] = n_samples
     kwargs[:single_layer] = single_layer
-    kwargs[:show_plots] = show_plots
 elseif mode == "erosion_test"
     kwargs[:v] = v
     kwargs[:h] = h
@@ -551,7 +546,6 @@ elseif mode == "erosion_test"
     kwargs[:L_sys_factor] = L_sys_factor
     kwargs[:first_passage_mode] = first_passage_mode
     kwargs[:min_doublons] = min_doublons
-    kwargs[:show_plots] = show_plots
     kwargs[:sweep_values_override] = sweep_values_override
 elseif mode == "phase_diagram"
     kwargs[:L] = L
@@ -571,7 +565,6 @@ elseif mode == "phase_diagram"
     kwargs[:thresh_prob] = thresh_prob
     kwargs[:min_erosion_length] = min_erosion_length
     kwargs[:doublon_mode] = doublon_mode
-    kwargs[:show_plots] = show_plots
     kwargs[:single_layer] = single_layer
     kwargs[:sweep_values_override] = sweep_values_override
 end

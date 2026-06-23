@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebFetch(domain:pmc.ncbi.nlm.nih.gov)",
-      "WebFetch(domain:pubs.aip.org)",
-      "Bash(julia --project=. -t 4 -e ':*)"
-    ]
-  }
-}

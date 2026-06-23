@@ -220,8 +220,7 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
                         n_perturbations::Int=200,
                         T_response::Int=0,
                         n_samples::Int=1,
-                        single_layer::Bool=false,
-                        show_plots::Bool=false, kwargs...)
+                        single_layer::Bool=false, kwargs...)
 
     # ── Sweep setup (shared by both methods) ──
     if vary_v
@@ -291,33 +290,6 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
             teff_values[idx] = teff
             all_histograms[idx] = histogram
             @printf("  [Thread %d] done: T_eff = %.4f\n", tid, teff)
-        end
-
-        if show_plots
-            for idx in 1:n_sweep
-                val = sweep_values[idx]
-                histogram = all_histograms[idx]
-                teff = teff_values[idx]
-                bins = sort(collect(keys(histogram)))
-                counts = [histogram[b] for b in bins]
-                total = sum(counts)
-                probs = counts ./ total
-                title_str = vary_v ? @sprintf("v = %.2f, T_eff = %.4f", val, teff) :
-                                     @sprintf("T = %.4f, T_eff = %.4f", val, teff)
-                valid = probs .> 0
-                fig = Plots.plot(bins[valid], probs[valid], seriestype=:scatter,
-                                 yscale=:log10, xlabel=raw"$E_d$", ylabel=raw"$P(E_d)$",
-                                 title=title_str, legend=:topright, markersize=4, size=(500, 400), label="data")
-                if !isnan(teff) && teff > 0
-                    x_fit = range(0, maximum(bins), length=100)
-                    Z = teff * (1 - exp(-maximum(bins) / teff))
-                    y_fit = exp.(-x_fit ./ teff) ./ Z
-                    Plots.plot!(fig, collect(x_fit), y_fit, linewidth=2, label=@sprintf("fit: T=%.3f", teff))
-                end
-                display(fig)
-                println("  Close the plot window to continue...")
-                readline()
-            end
         end
 
         println("\nDone!")
@@ -423,48 +395,6 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
         all_teff_pw[idx] = teff_pw
 
         @printf("  [Thread %d] %s: T_eff = %.4f (integrated)\n", tid, label, teff_int)
-    end
-
-    # Show plots if requested
-    if show_plots
-        for idx in 1:n_sweep
-            val = sweep_values[idx]
-            teff = teff_values[idx]
-            C = all_C[idx]
-            chi = all_chi[idx]
-            teff_pw = all_teff_pw[idx]
-
-            title_str = vary_v ? @sprintf("v = %.2f", val) : @sprintf("T = %.4f", val)
-
-            # Parametric plot: χ vs ΔC
-            delta_C = [C[1] - C[tau + 1] for tau in 1:T_response_actual]
-            fig1 = Plots.plot(delta_C, chi, seriestype=:scatter,
-                              xlabel="C(0) - C(τ)", ylabel="χ(τ)",
-                              title="$title_str — parametric (T_eff = $(@sprintf("%.3f", teff)))",
-                              legend=:topleft, markersize=3, size=(500, 400), label="data")
-            if !isnan(teff) && teff > 0
-                x_line = range(0, maximum(delta_C), length=100)
-                Plots.plot!(fig1, collect(x_line), collect(x_line) ./ teff,
-                           linewidth=2, label=@sprintf("1/T_eff = %.3f", 1.0/teff))
-            end
-            display(fig1)
-            println("  Close to see pointwise T_eff...")
-            readline()
-
-            # Pointwise T_eff vs τ
-            taus = collect(1:T_response_actual)
-            valid = isfinite.(teff_pw)
-            fig2 = Plots.plot(taus[valid], teff_pw[valid], seriestype=:scatter,
-                              xlabel="τ", ylabel="T_eff(τ) = dC/dτ / R(τ)",
-                              title="$title_str — pointwise FDR",
-                              legend=false, markersize=3, size=(500, 400))
-            if !isnan(teff)
-                Plots.hline!(fig2, [teff], linestyle=:dash, color=:red, linewidth=1.5)
-            end
-            display(fig2)
-            println("  Close the plot window to continue...")
-            readline()
-        end
     end
 
     # Build results

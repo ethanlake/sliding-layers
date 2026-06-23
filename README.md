@@ -11,15 +11,16 @@ This repository contains three independent simulation drivers, each a self-conta
 
 Plotting for all three is unified through [`sliding_plotter.py`](sliding_plotter.py). The dynamics is auto-detected from a `dynamics` tag inside each JLD2 file.
 
-**Conventions for `p`, `q`, `τ`** (across all sliding-Ising, GKL, and Glauber-Ising modes):
+**Conventions for `p`, `q`, `τ`, `r`** (across all sliding-Ising, GKL, and Glauber-Ising modes):
 
 | | Ising chain (sliding & `ising.jl`) | GKL automaton |
 |---|---|---|
 | `p` | `exp(-β J)` | per-cell noise rate |
 | `q` | `1/p = exp(β J)` | `1/p` |
 | `τ` | `exp(4 (β J)²)` | `1/√p` |
+| `r` | `(β J)² = (log(1/p))²` | `(log(1/p))²` |
 
-In both models `0 < p ≤ 1`, **small p = rare-event regime** (low temperature for Ising, low noise for GKL). In any mode that takes a min/max sweep over noise strength / temperature, you may set the range via any one of `--p_min/--p_max`, `--q_min/--q_max`, or `--tau_min/--tau_max`. The sweep is taken **linear in whichever parameter you specify**, and the values are converted to `p` internally. Same for the fixed single value (`--p`, `--q`, `--tau`); priority `tau > q > p`.
+In both models `0 < p ≤ 1`, **small p = rare-event regime** (low temperature for Ising, low noise for GKL). In any mode that takes a min/max sweep over noise strength / temperature, you may set the range via any one of `--p_min/--p_max`, `--q_min/--q_max`, `--tau_min/--tau_max`, or `--r_min/--r_max`. The sweep is taken **linear in whichever parameter you specify**, and the values are converted to `p` internally (`p = exp(−√r)` for the `r` parametrization). Same for the fixed single value (`--p`, `--q`, `--tau`, `--r`); priority `r > tau > q > p`.
 
 Earlier history: old data files saved with `p = exp(+β J)` (i.e. p > 1) are under the original sign convention; new runs use `exp(-β J)`. `ising.jl`'s `q` previously meant `exp(4 β J)` — it now means `exp(β J) = 1/p`, consistent with the rest of the codebase. Saved arrays in `ising.jl` outputs are now `p_values` (primary), with `q_values = 1/p_values` saved as a convenience.
 
@@ -51,7 +52,7 @@ Run any of the three drivers with `-t auto` to enable multithreading. Results ar
 
 ```bash
 # History mode (minority domain centered at L/2 by default)
-julia --project=. simulation_driver.jl --mode=history --L=2000 --beta=2.0 --T_steps=1000 --show_plot=true
+julia --project=. simulation_driver.jl --mode=history --L=2000 --beta=2.0 --T_steps=1000
 
 # Mixing mode with 4 threads
 julia --project=. -t 4 simulation_driver.jl --mode=mixing --L=2000 --n_trials=100
@@ -89,6 +90,7 @@ julia --project=. -t auto simulation_driver.jl --mode=phase_diagram --observable
 | `mode` | String | `"mixing"` | One of `history`, `mixing`, `ffs`, `energy`, `teff`, `erosion_test`, `phase_diagram` |
 | `save` | Bool | `true` | Save results to JLD2 file under `data/` |
 | `adj` | String | `""` | Suffix appended to the saved filename (before `.jld2`) |
+| `randshift` | Bool | `true` | Top-chain shift schedule. `true` (default) → Poisson process at rate `v` (inter-shift gaps ~ Exp(`L/v`)); `false` → legacy deterministic Bresenham schedule (shift `i` at MC-update count `round(i·L/v)`). The Poisson schedule removes spurious integer-vs-half-integer-`v` artifacts that arise when `L/v` is rational with a small denominator. Applies to every mode that drives MC dynamics (`history`, `mixing`, `ffs`, `energy`, `teff`, `erosion_test`, `phase_diagram`). |
 
 ### history mode
 
@@ -102,7 +104,6 @@ julia --project=. -t auto simulation_driver.jl --mode=phase_diagram --observable
 | `init` | String | `"domain"` | Initial condition: `"domain"` or `"random"` |
 | `domain_start` | Int | `3L÷8` | Minority-domain start (centered at L/2 by default) |
 | `domain_end` | Int | `5L÷8` | Minority-domain end |
-| `show_plot` | Bool | `false` | Open a Julia heatmap window after the run |
 
 ### mixing mode
 
@@ -129,6 +130,10 @@ For nucleation-style runs, `--adaptive_L=true` sets `L = adaptive_factor × ℓ_
 
 Phase-0 / probe / crossing-phase timeouts propagate as `failed=true` for the single FFS run, so partial timeouts visibly reduce the `n_ok/n_repeats` count rather than silently biasing the estimate.
 
+**Modified-clock seeding** (`--seed_droplet_size=k`, `k > 0`): whenever the dynamics returns to the all-`+` basin floor during Phase 0 / probes / crossings, instantly inject a `k`-spin minority droplet aligned on both chains. The skipped all-`+` sojourn time is not accounted for in `τ_mem`, so the resulting estimator is a **modified-clock memory time** `t̃_mem` rather than the bare `τ_mem` — useful when the Phase-0 ensemble is bimodal (single-spin fluctuations vs. genuine droplets) and direct sampling produces an erratic source distribution. See SM for the formal modified-clock convention; the plotter switches the y-label to `$\widetilde t_{\sf mem}$` automatically when this flag is present in the JLD2.
+
+**Periodic checkpointing**: when `save=true`, both FFS and energy modes pre-allocate the result arrays as `NaN`, write a skeleton JLD2 immediately, and re-serialize the full results dict after each completed sweep point (under a `ReentrantLock` to coordinate threads). A crash mid-sweep loses at most one in-flight sweep point; the plotter masks `NaN` entries automatically.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `L` | Int | `2000` | Chain length (ignored when `adaptive_L=true`) |
@@ -146,13 +151,16 @@ Phase-0 / probe / crossing-phase timeouts propagate as `failed=true` for the sin
 | `adaptive_L` | Bool | `false` | Per sweep point, find ℓ_er and set `L = adaptive_factor × ℓ_er` (requires `single_layer=false`) |
 | `adaptive_factor` | Float | `3.0` | Multiplier on ℓ_er when `adaptive_L=true` |
 | `M_threshold` | Float | `0.75` | Target magnetization (escape threshold) |
-| `max_time_per_trial` | Int | `100000000` | Per-trial timeout (very generous; see timeout-propagation note above) |
+| `max_time_per_trial` | Int | `200000000` | Per-trial timeout (very generous; see timeout-propagation note above) |
 | `lambda_0` | Float | `NaN` | If set, overrides the auto-calibrated λ_0 |
 | `single_layer` | Bool | `false` | Simulate a single chain |
+| `seed_droplet_size` | Int | `0` | `>0` enables modified-clock seeding: inject a `k`-spin droplet on both chains whenever the state returns to all-`+`. Produces `t̃_mem` instead of `τ_mem` (see paragraph above). |
 
-The deprecated `--n_configs` flag is still accepted: translated to `n_configs_per_run = n_configs ÷ n_repeats` with a warning.
+The driver also auto-detects a `v`-sweep: passing both `--v_min` and `--v_max` (even without `--vary_v=true`) flips `vary_v` on. Explicit `--vary_v=true|false` still wins. (Same auto-detect in `energy` mode.)
 
 ### energy mode
+
+Steady-state energy `⟨E⟩` and heat flow `⟨Q̇⟩` are estimated by **block averaging** the `T_sample` sampling window into 20 blocks: each block's mean is one quasi-independent observation, and the stderr-of-the-mean is `std(block_means) / √n_blocks`. Saved arrays `mean_energies_std` and `mean_heat_flows_std` are read by the plotter as errorbars. Periodic checkpointing (above) applies — same NaN-skeleton + per-sweep-point dump contract as FFS. The `v`-sweep auto-detect (passing `--v_min` and `--v_max`) also works here.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -192,7 +200,6 @@ Two estimators are available:
 | `n_perturbations` | Int | `200` | Number of perturbation experiments (FDR method) |
 | `T_response` | Int | `0` | Max correlation/response time lag; 0 = auto (FDR method) |
 | `single_layer` | Bool | `false` | Single chain |
-| `show_plots` | Bool | `false` | Display diagnostic plots after each sweep value |
 
 ### erosion_test mode
 
@@ -214,8 +221,7 @@ Two estimators are available:
 | `first_passage_mode` | Bool | `false` | Variable-time first-passage escape measurement instead of fixed-time shrinkage |
 | `min_doublons` | Int | `10` | Lower boundary for the first-passage erode condition |
 | `erode_vs_l` | Bool | `false` | Also save and (optionally) plot shrink probability vs l for each sweep value |
-| `show_histories` | Bool | `false` | Display spacetime heatmaps at ℓ_er, 0.75·ℓ_er, 1.25·ℓ_er after each sweep value |
-| `show_plots` | Bool | `false` | Display the survival-vs-l plot interactively |
+| `show_histories` | Bool | `false` | Display spacetime heatmaps at ℓ_er, 0.75·ℓ_er, 1.25·ℓ_er after each sweep value (requires Plots.jl) |
 
 ### phase_diagram mode
 
@@ -238,7 +244,6 @@ For each p in the outer sweep, finds the onset velocity v\* by sweeping v and st
 | `thresh_prob` | Float | `0.75` | (erosion) |
 | `min_erosion_length` | Int | `2` | (erosion) |
 | `doublon_mode` | Bool | `false` | (erosion) |
-| `show_plots` | Bool | `false` | Display the inner (v, y) curve per p, with the detected v\* marker |
 | `single_layer` | Bool | `false` | (mixing) |
 
 ---
@@ -249,7 +254,7 @@ Canonical Gács-Kurdyumov-Levin rule with biased noise: at each site, with proba
 
 ### Modes
 
-- **history** — spacetime σ(x, t); supports `--show_plot=true`
+- **history** — spacetime σ(x, t)
 - **ffs** — memory time τ via FFS (same algorithmic structure as sliding-Ising)
 - **ler** — erosion length ℓ_er (single-chain analog of `erosion_test`)
 - **diffusion** — magnetization-MSD-based diffusion constant D
@@ -262,7 +267,7 @@ With η > 0 (forced via `eta = abs(eta)`), the noise drives the chain toward +1;
 
 ```bash
 # History (sync, domain init)
-julia --project=. gkl.jl --mode=history --L=400 --T_steps=400 --eta=0.10 --p_noise=0.05 --show_plot=true
+julia --project=. gkl.jl --mode=history --L=400 --T_steps=400 --eta=0.10 --p_noise=0.05
 
 # FFS sweep over p_noise
 julia --project=. -t auto gkl.jl --mode=ffs --L=500 --eta=0.05 \
@@ -301,7 +306,6 @@ julia --project=. -t auto gkl.jl --mode=diffusion --L=500 --eta=0.0 \
 | `p_noise` | Float | `0.05` | |
 | `init` | String | `"domain"` | `"domain"` / `"random"` / `"all_plus"` / `"all_minus"` |
 | `domain_start`, `domain_end` | Int | `3L÷8`, `5L÷8` | |
-| `show_plot` | Bool | `false` | |
 
 ### ffs mode
 
@@ -313,6 +317,7 @@ Mirrors `simulation_driver.jl`'s FFS structure (same `n_interfaces`, `adaptive_L
 | `p_noise` | Float | `0.10` | Fixed p_noise (when `vary_eta=true`) |
 | `p_min`, `p_max` | Float | `0.02`, `0.20` | p_noise sweep range |
 | `tau_min`, `tau_max` | Float | `NaN`, `NaN` | If both finite, sweep uniformly in τ=1/√p instead |
+| `r_min`, `r_max` | Float | `NaN`, `NaN` | If both finite, sweep uniformly in `r = (log(1/p))²` instead (`p = exp(−√r)`) |
 | `eta_min`, `eta_max` | Float | `0.01`, `0.20` | η sweep range (when `vary_eta=true`) |
 | `n_steps` | Int | `6` | |
 | `vary_eta` | Bool | `false` | If true, sweep η at fixed p_noise |
@@ -333,6 +338,7 @@ Mirrors `simulation_driver.jl`'s FFS structure (same `n_interfaces`, `adaptive_L
 | `p_noise` | Float | `0.10` | |
 | `p_min`, `p_max` | Float | `0.02`, `0.20` | |
 | `tau_min`, `tau_max` | Float | `NaN`, `NaN` | Uniform-in-τ sweep |
+| `r_min`, `r_max` | Float | `NaN`, `NaN` | Uniform-in-`r` sweep, `r = (log(1/p))²`, `p = exp(−√r)` |
 | `eta_min`, `eta_max` | Float | `0.01`, `0.20` | |
 | `n_steps` | Int | `6` | |
 | `vary_eta` | Bool | `false` | |
@@ -342,7 +348,7 @@ Mirrors `simulation_driver.jl`'s FFS structure (same `n_interfaces`, `adaptive_L
 | `t_evolve_factor` | Float | `2.0` | |
 | `L_sys_factor` | Float | `1.0` | |
 | `erode_vs_l` | Bool | `false` | |
-| `show_histories`, `show_plots` | Bool | `false` | |
+| `show_histories` | Bool | `false` | Display spacetime heatmaps (requires Plots.jl) |
 
 ### diffusion mode
 
@@ -405,7 +411,6 @@ julia --project=. -t auto ising.jl --mode=ffs --L=200 \
 | `p` | Float | `0.5` | `β = -log(p)`. May also be set via `--q` or `--tau`. |
 | `T_steps` | Int | `500` | |
 | `init` | String | `"all_plus"` | `"all_plus"` / `"all_minus"` / `"random"` |
-| `show_plot` | Bool | `false` | |
 
 ### ffs mode
 
@@ -463,8 +468,12 @@ python3 sliding_plotter.py \
 | `--inset` | ffs / mixing | Add a small inset showing exponential-fit coefficients (multi-file required) |
 | `--fit_inset` | erosion_test / ffs / mixing | Add an inset showing the per-file linear-fit slope |
 | `--ploglog` | ffs | log-log plot of log₁₀(τ) vs p with per-file fit log τ ~ p^a |
-| `--a=A` | ffs | Plot τ against x^A instead of x (test log τ ~ p^A) |
+| `--a=A` | ffs | Plot τ against x^A instead of x (test log τ ~ p^A); also overrides the exponent in the `--xr` transform |
 | `--alpha=Α` | ffs / mixing | When sweeping p, plot τ against (β·J)^α instead of p |
+| `--xp` | ffs (GKL p-sweep) | Plot `t_mem` against `p` (explicit default; useful to override an implicit transform) |
+| `--xq` | ffs (GKL p-sweep) | Plot `t_mem` against `1/p` |
+| `--xlogsqq` | ffs (GKL p-sweep) | Plot `t_mem` against `(log(1/p))²` |
+| `--xr` | ffs (sliding-Ising p-sweep) | Plot `t_mem` against `(β J)² = (log(1/p))²` (same transform as `--xlogsqq` but labeled with the Ising temperature variable); combine with `--a=A` to use `(β J)^A` |
 | `--anchor_normalize` | ffs+mixing overlay | Rescale each FFS curve so it matches the direct value at the smallest x |
 | `--logy` | erosion_test | Log y-axis |
 | `--raw` | erosion_test | P_shrink vs raw l instead of l / ℓ_c |
@@ -472,5 +481,11 @@ python3 sliding_plotter.py \
 | `--heat` | energy | Heat flow instead of energy |
 | `--t_max=T` | history | Truncate time axis to [0, T] |
 | `--hide_ticks` | history | Hide axis ticks/labels |
-| `--xscale`, `--yscale` | any | Force `linear` or `log` axis |
+| `--xscale`, `--yscale` | any | Force `linear` or `log` on the corresponding axis of every figure produced this run |
+| `--cmap=NAME` | any | Override the per-file colormap with the named matplotlib colormap (e.g. `viridis`, `Greens`). Replaces the default `coolwarm_r` / rainbow / `Oranges` / `Blues` choices in every plot mode that colors multiple files |
+| `--legloc=LOC` | any | Force the legend location on every figure (e.g. `"upper left"`, `"lower right"`); overrides each plot mode's hard-coded default (typically `"best"`) |
+| `--fitrange=F` | ffs / mixing / energy | Per-file linear fit of `ln(y)` vs the *plotted* x-coordinate over the upper `(1−F)` portion of x (e.g. `--fitrange=0.2` → fit over `x ≥ x_min + 0.2·(x_max − x_min)`, i.e. the last 80%). Honors `--a`/`--alpha`/`--xr`/`--xq`/`--xp`/`--xlogsqq`, so e.g. `--xr --a=2 --fitrange=0.2` fits `ln(y) ~ (βJ)²`. Prints slope, intercept, their stderrs, R², and n per file; overlays each fit as a black dashed line. Ignored with `--ploglog` (where the y-axis is already `log10`). |
+| `--residuals` | ffs / mixing / energy (with `--fitrange`) | Companion diagnostic: swap the figure for a 3:1 two-panel gridspec with the data + fit lines on top and per-file residuals `ln(y) − (slope·x + intercept)` on the bottom (matching colors, shared x-axis). Residuals are shown for **all** plotted points — including those outside the fit window — so systematic curvature outside the fit anchors a "wrong-exponent" diagnostic. No-op without `--fitrange`. |
 | `--pmin`, `--pmax`, `--vmin`, `--vmax` | phase_diagram | Crop axes |
+
+The plotter also auto-switches the FFS y-axis label between `$t_{\sf mem}$` and `$\widetilde t_{\sf mem}$` depending on whether the JLD2 records a non-zero `seed_droplet_size` (the modified-clock estimator described in the FFS section above).

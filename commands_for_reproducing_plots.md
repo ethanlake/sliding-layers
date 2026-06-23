@@ -35,5 +35,14 @@ Memory time vs v for sliding:
 ```
 python3 sliding_plotter.py data/ising_sliding_ffs_p0.18_v0.00to5.00_adaptiveLx16test.jld2 data/ising_sliding_ffs_p0.21_v0.00to5.00_adaptiveLx8test.jld2 data/ising_sliding_ffs_p0.24_v0.00to5.00_adaptiveLx8test.jld2 data/ising_sliding_ffs_p0.29_v0.00to5.00_adaptiveLx8test.jld2 --xr
 ``` 
+(to see the quality of the fit, add --fitrange .2 --residuals)
 
-Memory time vs (beta J)^2 for sliding: 
+Memory time vs (beta J)^2 for sliding:
+```
+python3 sliding_plotter.py data/ising_sliding_ffs_v6.00_p0.09to0.37_adaptiveLx8_seedsize2test.jld2 data/ising_sliding_ffs_v5.00_p0.09to0.37_adaptiveLx8_seedsize2test.jld2 data/ising_sliding_ffs_v4.00_p0.09to0.37_adaptiveLx8_seedsize2test.jld2 data/ising_sliding_ffs_v3.00_p0.09to0.37_adaptiveLx8_seedsize2test.jld2 data/ising_sliding_ffs_v2.00_p0.09to0.37_adaptiveLx8_seedsize2test.jld2 --xr --a 2
+``` 
+
+Average energy in steady state vs v for sliding: 
+``` 
+python3 sliding_plotter.py data/ising_sliding_energy_L4000_p0.40.jld2 data/ising_sliding_energy_L4000_p0.45.jld2 data/ising_sliding_energy_L4000_p0.50.jld2 data/ising_sliding_energy_L4000_p0.55.jld2 --cmap winter --legloc right
+``` 

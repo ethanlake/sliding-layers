@@ -32,9 +32,6 @@ Remaining entries of y_matrix stay NaN once the sweep stops.
 Mixing observable: baseline = t_mix(v=0), cutoff = onset_threshold · t_mix(v=0).
 Erosion observable: baseline = lc(v_min) (since v=0 is not allowed), cutoff =
 onset_threshold · lc(v_min).
-
-If show_plots is true, display a per-p diagnostic plot of the inner curve with
-v* and the cutoff drawn in.
 """
 function run_phase_diagram_mode(; L::Int, h::Float64,
                                   p_min::Float64, p_max::Float64, n_p_steps::Int,
@@ -44,7 +41,7 @@ function run_phase_diagram_mode(; L::Int, h::Float64,
                                   n_trials::Int, M_threshold::Float64, max_time::Int,
                                   erosion_num_trials::Int, thresh_prob::Float64,
                                   min_erosion_length::Int, doublon_mode::Bool,
-                                  show_plots::Bool, single_layer::Bool,
+                                  single_layer::Bool,
                                   sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
                                   kwargs...)
     observable in ("mixing", "erosion") ||
@@ -132,31 +129,6 @@ function run_phase_diagram_mode(; L::Int, h::Float64,
         end
 
         @printf("  → v* = %.4g\n", v_onset[i])
-
-        if show_plots
-            ylab = observable == "mixing" ? "mean mixing time" : "critical erosion length"
-            mask = isfinite.(y_matrix[i, :])
-            v_plot = collect(v_values[mask])
-            y_plot = collect(y_matrix[i, :][mask])
-            # For mixing, prepend the (v=0, t_mix(0)) baseline so the plotted
-            # line covers the same range used by the interpolation.
-            if observable == "mixing" && isfinite(y_baseline[i])
-                pushfirst!(v_plot, 0.0)
-                pushfirst!(y_plot, y_baseline[i])
-            end
-            plt = Plots.plot(v_plot, y_plot, marker=:circle,
-                             xlabel="v", ylabel=ylab,
-                             title=@sprintf("p = %.3f, v* = %.4g", p, v_onset[i]),
-                             label="data", legend=:topleft)
-            if isfinite(y_baseline[i])
-                Plots.hline!(plt, [onset_threshold * y_baseline[i]], linestyle=:dot,
-                             label=@sprintf("%.2f·%s", onset_threshold, baseline_label))
-            end
-            if isfinite(v_onset[i])
-                Plots.vline!(plt, [v_onset[i]], linestyle=:dash, label="v*")
-            end
-            display(plt)
-        end
     end
 
     println("\nDone!")

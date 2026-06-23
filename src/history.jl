@@ -9,7 +9,7 @@ Run simulation in history mode:
 function run_history_mode(; L::Int, v::Float64, beta::Float64, h::Float64,
                            T_steps::Int, init::String="domain",
                            domain_start::Int=3L÷8, domain_end::Int=5L÷8,
-                           show_plot::Bool=false, kwargs...)
+                           kwargs...)
     println("=== Sliding Ising Chain: History Mode ===")
     println("L = $L, v = $v, β = $beta, T = $T_steps, init = $init")
 
@@ -44,22 +44,6 @@ function run_history_mode(; L::Int, v::Float64, beta::Float64, h::Float64,
     end)
 
     println("Done!")
-
-    if show_plot
-        T_total = size(magnetization_history, 1)
-        mag_shifted = similar(magnetization_history)
-        for t in 1:T_total
-            shift = mod(round(Int, v * (t - 1) / 2), L)
-            mag_shifted[t, :] = circshift(magnetization_history[t, :], -shift)
-        end
-        fig = Plots.heatmap(mag_shifted, c=:RdBu, clims=(-2, 2),
-                            xlabel="site", ylabel="t",
-                            title=@sprintf("L=%d, v=%.2f, β=%.3f", L, v, beta),
-                            size=(400, 700))
-        display(fig)
-        println("Close the plot window (or press Enter) to exit...")
-        try readline() catch end
-    end
 
     return Dict{String, Any}(
         "magnetization_history" => magnetization_history,
