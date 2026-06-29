@@ -1,7 +1,7 @@
 # sliding-layers
-creating long-lived memories with friction
+Creating long-lived 1d memories with magnetic friction! This repo contains all code needed to reproduce the results of [](this paper). For supplementary results and a more detailed explanation of the numerical techniques, see [`paper/SM.pdf`](paper/SM.pdf). 
 
-This repository contains three independent simulation drivers, each a self-contained Julia script invoked from the command line:
+The main code is run through three independent simulation drivers, each a self-contained Julia script invoked from the command line:
 
 | Driver | Model | Notes |
 |---|---|---|
@@ -9,20 +9,8 @@ This repository contains three independent simulation drivers, each a self-conta
 | [`gkl.jl`](gkl.jl) | Noisy 1D GKL cellular automaton | Standalone, no module dependency. |
 | [`ising.jl`](ising.jl) | 1D Glauber Ising chain (h=0) | Standalone; primarily for FFS benchmarks. |
 
-Plotting for all three is unified through [`sliding_plotter.py`](sliding_plotter.py). The dynamics is auto-detected from a `dynamics` tag inside each JLD2 file.
+Plotting for all three is unified through [`sliding_plotter.py`](sliding_plotter.py) (see below). 
 
-**Conventions for `p`, `q`, `τ`, `r`** (across all sliding-Ising, GKL, and Glauber-Ising modes):
-
-| | Ising chain (sliding & `ising.jl`) | GKL automaton |
-|---|---|---|
-| `p` | `exp(-β J)` | per-cell noise rate |
-| `q` | `1/p = exp(β J)` | `1/p` |
-| `τ` | `exp(4 (β J)²)` | `1/√p` |
-| `r` | `(β J)² = (log(1/p))²` | `(log(1/p))²` |
-
-In both models `0 < p ≤ 1`, **small p = rare-event regime** (low temperature for Ising, low noise for GKL). In any mode that takes a min/max sweep over noise strength / temperature, you may set the range via any one of `--p_min/--p_max`, `--q_min/--q_max`, `--tau_min/--tau_max`, or `--r_min/--r_max`. The sweep is taken **linear in whichever parameter you specify**, and the values are converted to `p` internally (`p = exp(−√r)` for the `r` parametrization). Same for the fixed single value (`--p`, `--q`, `--tau`, `--r`); priority `r > tau > q > p`.
-
-Earlier history: old data files saved with `p = exp(+β J)` (i.e. p > 1) are under the original sign convention; new runs use `exp(-β J)`. `ising.jl`'s `q` previously meant `exp(4 β J)` — it now means `exp(β J) = 1/p`, consistent with the rest of the codebase. Saved arrays in `ising.jl` outputs are now `p_values` (primary), with `q_values = 1/p_values` saved as a convenience.
 
 ## Setup
 
@@ -32,7 +20,7 @@ Requires Julia (≥1.10). One-time dependency install:
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-Run any of the three drivers with `-t auto` to enable multithreading. Results are saved to `data/` as JLD2 files. All parameters accept `--key=value` overrides on the command line.
+Run any of the three drivers with `-t auto` to enable multithreading. Results are saved by default to `data/` as JLD2 files. All parameters accept `--key=value` overrides on the command line.
 
 ---
 
@@ -40,11 +28,11 @@ Run any of the three drivers with `-t auto` to enable multithreading. Results ar
 
 ### Modes
 
-- **history** — spacetime evolution of a domain wall in the co-moving frame
+- **history** — spacetime evolution of a domain wall 
 - **mixing** — direct ensemble-averaged mixing time vs temperature / velocity
 - **ffs** — mixing time via forward flux sampling (with optional canonical-mode interfaces and adaptive L)
 - **energy** — steady-state energy and heat flow vs temperature or velocity
-- **teff** — effective temperature via FDR or demon algorithm
+- **teff** — effective temperature via FDR or demon algorithm (not used in main paper)
 - **erosion_test** — critical erosion length ℓ_er vs temperature or velocity
 - **phase_diagram** — onset velocity v\*(p) above which mixing time / erosion length grows with v
 
@@ -128,11 +116,9 @@ By default uses **adaptive interface placement**: each interface λᵢ is chosen
 
 For nucleation-style runs, `--adaptive_L=true` sets `L = adaptive_factor × ℓ_er` per sweep point — the erosion length is found at each (β, v) by the same routine as `erosion_test` mode and the system is sized to fit a critical droplet.
 
-Phase-0 / probe / crossing-phase timeouts propagate as `failed=true` for the single FFS run, so partial timeouts visibly reduce the `n_ok/n_repeats` count rather than silently biasing the estimate.
+**Modified-clock seeding** (`--seed_droplet_size=k`, `k > 0`): whenever the dynamics returns to the all-`+` basin floor during Phase 0 / probes / crossings, instantly inject a `k`-spin minority droplet aligned on both chains. The skipped all-`+` sojourn time is not accounted for in `τ_mem`, so the resulting estimator is a **modified-clock memory time** `t̃_mem` rather than the bare `τ_mem`. See the SM for the formal modified-clock convention; the plotter switches the y-label to `$\widetilde t_{\sf mem}$` automatically when this flag is present in the JLD2.
 
-**Modified-clock seeding** (`--seed_droplet_size=k`, `k > 0`): whenever the dynamics returns to the all-`+` basin floor during Phase 0 / probes / crossings, instantly inject a `k`-spin minority droplet aligned on both chains. The skipped all-`+` sojourn time is not accounted for in `τ_mem`, so the resulting estimator is a **modified-clock memory time** `t̃_mem` rather than the bare `τ_mem` — useful when the Phase-0 ensemble is bimodal (single-spin fluctuations vs. genuine droplets) and direct sampling produces an erratic source distribution. See SM for the formal modified-clock convention; the plotter switches the y-label to `$\widetilde t_{\sf mem}$` automatically when this flag is present in the JLD2.
-
-**Periodic checkpointing**: when `save=true`, both FFS and energy modes pre-allocate the result arrays as `NaN`, write a skeleton JLD2 immediately, and re-serialize the full results dict after each completed sweep point (under a `ReentrantLock` to coordinate threads). A crash mid-sweep loses at most one in-flight sweep point; the plotter masks `NaN` entries automatically.
+**Periodic checkpointing**: when `save=true`, both FFS and energy modes pre-allocate the result arrays as `NaN`, write a skeleton JLD2 immediately, and re-serialize the full results dict after each completed sweep point (under a `ReentrantLock` to coordinate threads). A crash mid-sweep loses at most one in-flight sweep point. 
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -160,7 +146,7 @@ The driver also auto-detects a `v`-sweep: passing both `--v_min` and `--v_max` (
 
 ### energy mode
 
-Steady-state energy `⟨E⟩` and heat flow `⟨Q̇⟩` are estimated by **block averaging** the `T_sample` sampling window into 20 blocks: each block's mean is one quasi-independent observation, and the stderr-of-the-mean is `std(block_means) / √n_blocks`. Saved arrays `mean_energies_std` and `mean_heat_flows_std` are read by the plotter as errorbars. Periodic checkpointing (above) applies — same NaN-skeleton + per-sweep-point dump contract as FFS. The `v`-sweep auto-detect (passing `--v_min` and `--v_max`) also works here.
+Steady-state energy `⟨E⟩` and heat flow `⟨Q̇⟩` are estimated by **block averaging** the `T_sample` sampling window into 20 blocks: each block's mean is one quasi-independent observation, and the stderr-of-the-mean is `std(block_means) / √n_blocks`. Saved arrays `mean_energies_std` and `mean_heat_flows_std` are read by the plotter as errorbars. Periodic checkpointing (above) applies. The same `v`-sweep auto-detect (passing `--v_min` and `--v_max`) also works here.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -175,11 +161,11 @@ Steady-state energy `⟨E⟩` and heat flow `⟨Q̇⟩` are estimated by **block
 | `T_equil` | Int | `125000` | Equilibration time units |
 | `T_sample` | Int | `200000` | Sampling time units |
 
-### teff mode (effective temperature)
+### teff mode (effective temperature) [not used in the paper]
 
 Two estimators are available:
 
-- **FDR method** (default): measures T_eff = (∂C/∂τ) / R(τ), where C(τ) is the magnetization autocorrelation and R(τ) is the impulse response to a small field perturbation. Also computes the parametric χ(τ) vs C(0)−C(τ) cross-check.
+- **FDR method** (default): measures T_eff = (∂C/∂τ) / R(τ), where C(τ) is the magnetization autocorrelation and R(τ) is the impulse response to a small field perturbation. Also computes the parametric χ(τ) vs C(0)−C(τ) cross-check. In practice this does not seem to work very well...
 - **Demon method** (`--demon=true`): weakly couples an Einstein-demon with energy E_d. Histogram P(E_d) is fit to exp(−E_d/T_eff).
 
 | Parameter | Type | Default | Description |
@@ -367,7 +353,7 @@ Measures the magnetization-MSD diffusion constant D by tracking deviations of to
 
 ## `ising.jl` — 1D Glauber Ising chain at h=0
 
-Primary sweep parameter is **p = exp(−β J) ∈ (0, 1]** (same as everywhere else in the codebase). You may equivalently specify `--q_min/--q_max` (where `q = 1/p = exp(β J)`) or `--tau_min/--tau_max` (where `τ = exp(4 (β J)²)`); the sweep is taken to be linear in whichever you specify. Glauber dynamics: `P_flip = 1 / (1 + exp(β·ΔE))` on a single chain with periodic BCs. Built primarily as a controlled benchmark for the FFS pipeline against direct ensemble-averaged measurements.
+Primary sweep parameter is **p = exp(−β J) ∈ (0, 1]** (same as everywhere else in the codebase). You may equivalently specify `--q_min/--q_max` (where `q = 1/p = exp(β J)`) or `--tau_min/--tau_max` (where `τ = exp(4 (β J)²)`); the sweep is taken to be linear in whichever parameter is specified. Uses Glauber dynamics with `P_flip = 1 / (1 + exp(β·ΔE))` on a single chain with periodic BCs. Built primarily to benchmark the FFS code. 
 
 ### Modes
 

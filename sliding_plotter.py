@@ -57,6 +57,10 @@ _USER_CMAP = None
 # call below uses this loc string instead of its hard-coded default.
 _USER_LEGLOC = None
 
+# Set by main() when --legend_alpha is provided. When non-None, every legend
+# call below uses this framealpha instead of its hard-coded default.
+_USER_LEGEND_ALPHA = None
+
 
 def _user_or(default_cmap_obj):
     """Return the --cmap override if set, otherwise `default_cmap_obj`."""
@@ -66,6 +70,26 @@ def _user_or(default_cmap_obj):
 def _legloc(default='best'):
     """Return the --legloc override if set, otherwise `default`."""
     return _USER_LEGLOC if _USER_LEGLOC is not None else default
+
+
+def _legalpha(default):
+    """Return the --legend_alpha override if set, otherwise `default`."""
+    return _USER_LEGEND_ALPHA if _USER_LEGEND_ALPHA is not None else default
+
+
+# Set by main() when --add_lines is provided. When True, marker-only data
+# series (ffs / mixing / erosion) draw a connecting line between points.
+_USER_ADD_LINES = False
+
+
+def _line_fmt(default='o'):
+    """Return '-' + default-marker if --add_lines is set, else just the marker."""
+    return ('-' + default) if _USER_ADD_LINES else default
+
+
+def _line_lw(default=0):
+    """Return the standard `linewidth` if --add_lines is set, else `default`."""
+    return linewidth if _USER_ADD_LINES else default
 
 
 def _legend_no_errorbars(ax, **kwargs):
@@ -297,7 +321,7 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
                 v = data.get('v', '?')
                 v_label = f'{int(v)}' if isinstance(v, float) and v == int(v) else f'{v}'
                 label = rf'$v={v_label}$'
-                xlabel = r'$p$'
+                xlabel = r'$e^{\beta J}$'
                 fixed_param_val = v if isinstance(v, (int, float)) else None
             sweep_kind = 'vary_p'
 
@@ -314,18 +338,17 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
 
         if has_errors:
             err = np.where(np.isfinite(lc_stderrs), lc_stderrs, 0.0)
-            ax.errorbar(x_arr[mask], lc_arr[mask], yerr=err[mask], fmt='o',
+            ax.errorbar(x_arr[mask], lc_arr[mask], yerr=err[mask], fmt=_line_fmt('o'),
                         color=colors[idx], markerfacecolor=colors[idx],
-                        markeredgecolor='none', markeredgewidth=0,
+                        markeredgecolor='k',
                         markersize=0.75 * marker_size,
-                        linewidth=0, alpha=0.7, capsize=3, label=label,
+                        linewidth=_line_lw(0), alpha=1.0, capsize=3, label=label,
                         zorder=3)
         else:
-            ax.plot(x_arr[mask], lc_arr[mask], 'o', color=colors[idx],
-                    markerfacecolor=colors[idx], markeredgecolor='none',
-                    markeredgewidth=0,
-                    markersize=0.75 * marker_size, alpha=0.7, label=label,
-                    zorder=3)
+            ax.plot(x_arr[mask], lc_arr[mask], _line_fmt('o'), color=colors[idx],
+                    markerfacecolor=colors[idx], markeredgecolor='k',
+                    markersize=0.75 * marker_size, linewidth=_line_lw(0),
+                    alpha=1.0, label=label, zorder=3)
 
         sweep_kind_global = sweep_kind  # all files share the same sweep kind
 
@@ -389,13 +412,13 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
     ax.set_xlabel(xlabel or r'$p$')
     ax.set_ylabel(r'$\xi_{\sf er}$')
     if fit_inset:
-        leg = ax.legend(loc=_legloc('lower right'), frameon=True, fancybox=False,
-                        edgecolor='none', framealpha=0.8)
+        leg = _legend_no_errorbars(ax, loc=_legloc('lower right'), frameon=True,
+                                   fancybox=False, edgecolor='none', framealpha=_legalpha(0.8))
         leg.get_frame().set_facecolor('white')
         leg.get_frame().set_linewidth(0)
     else:
-        ax.legend(loc=_legloc(), frameon=not True, fancybox=False,
-                  edgecolor='black', framealpha=0.9)
+        _legend_no_errorbars(ax, loc=_legloc(), frameon=not True, fancybox=False,
+                             edgecolor='black', framealpha=_legalpha(0.9))
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
 
@@ -600,7 +623,7 @@ def plot_erosion_mode(filenames, raw=False, small_stats=False, fit_inset=False, 
             ax2.set_yscale('log')
         ax2.set_ylabel(r'$P_{\sf escape}(\ell)$' if has_escape_data else r'$1-P_{\sf er}(\ell)$')
         legend_title = r'$p$' if (small_stats and sweep_key == 'p') else None
-        ax2.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9, title=legend_title)
+        _legend_no_errorbars(ax2, loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=_legalpha(0.9), title=legend_title)
         ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax2.set_axisbelow(True)
         plt.tight_layout()
@@ -669,14 +692,14 @@ def plot_energy_mode(filenames, heat=False, fitrange=None, residuals=False):
             yerr = (y_std / denom) if has_err else None
 
         if has_err:
-            ax.errorbar(x, y_plot, yerr=yerr, fmt='o', color=colors[idx],
+            ax.errorbar(x, y_plot, yerr=yerr, fmt='-o', color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=marker_size, linewidth=0, alpha=1.0,
+                        markersize=marker_size, linewidth=linewidth, alpha=1.0,
                         capsize=3, label=label)
         else:
-            ax.plot(x, y_plot, 'o', color=colors[idx],
+            ax.plot(x, y_plot, '-o', color=colors[idx],
                     markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=marker_size, linewidth=0, alpha=1.0,
+                    markersize=marker_size, linewidth=linewidth, alpha=1.0,
                     label=label)
 
         if fitrange is not None:
@@ -693,7 +716,7 @@ def plot_energy_mode(filenames, heat=False, fitrange=None, residuals=False):
     # plots): visible frame off, no edge, α≈0.5 so curves behind remain
     # partially readable through it.
     leg = _legend_no_errorbars(ax, loc=_legloc(), frameon=True, fancybox=False,
-                               edgecolor='none', framealpha=0.5,
+                               edgecolor='none', framealpha=_legalpha(0.5),
                                title=r'$e^{-\beta J}$')
     leg.get_frame().set_facecolor('white')
     leg.get_frame().set_linewidth(0)
@@ -763,7 +786,7 @@ def plot_teff_mode(filenames):
 
     ax.set_xlabel(xlabel or r'$T$')
     ax.set_ylabel(r'$T_{\mathrm{eff}}$')
-    ax.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+    _legend_no_errorbars(ax, loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=_legalpha(0.9))
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     plt.tight_layout()
@@ -833,7 +856,7 @@ def plot_teff_mode(filenames):
 
         ax2.set_xlabel(r'$C(0) - C(\tau)$')
         ax2.set_ylabel(r'$\chi(\tau)$')
-        ax2.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+        _legend_no_errorbars(ax2, loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=_legalpha(0.9))
         ax2.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax2.set_axisbelow(True)
         plt.tight_layout()
@@ -880,7 +903,7 @@ def plot_teff_mode(filenames):
 
         ax3.set_xlabel(r'$\tau$')
         ax3.set_ylabel(r'$T_{\mathrm{eff}}(\tau) = \partial_\tau C / R$')
-        ax3.legend(loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=0.9)
+        _legend_no_errorbars(ax3, loc=_legloc(), frameon=not True, fancybox=False, edgecolor='black', framealpha=_legalpha(0.9))
         ax3.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         ax3.set_axisbelow(True)
         plt.tight_layout()
@@ -1232,9 +1255,9 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False,
                 curve_data.append((x_values, np.log10(mean_mixing_times), v, False, idx))
 
         x_plot = _xtransform(x_values) if (not is_vary_v) else x_values
-        ax.plot(x_plot, mean_mixing_times, 'o', color=colors[idx],
+        ax.plot(x_plot, mean_mixing_times, _line_fmt('o'), color=colors[idx],
                 markerfacecolor=colors[idx], markeredgecolor='k',
-                markersize=marker_size, linewidth=0, alpha=1.0,
+                markersize=marker_size, linewidth=_line_lw(0), alpha=1.0,
                 label=label)
 
         if fitrange is not None:
@@ -1262,7 +1285,7 @@ def plot_mixing_mode(filenames, inset=False, alpha=None, fit_inset=False,
     if inset and is_vary_v is not None:
         legend_title = r'$p$' if is_vary_v else r'$v$'
     _legend_no_errorbars(ax, loc=_legloc(), frameon=not True, fancybox=False,
-                         edgecolor='black', framealpha=0.9, title=legend_title)
+                         edgecolor='black', framealpha=_legalpha(0.9), title=legend_title)
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     if not _finalize_residual_panel(ax, residual_ax):
@@ -1565,14 +1588,14 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
 
             if has_std:
                 ax.errorbar(x_values[mask], y_vals[mask], yerr=yerr,
-                            fmt='o', color=colors[idx],
+                            fmt=_line_fmt('o'), color=colors[idx],
                             markerfacecolor=colors[idx], markeredgecolor='k',
-                            markersize=_ms, linewidth=0,
+                            markersize=_ms, linewidth=_line_lw(0),
                             alpha=1.0, capsize=3, label=label)
             else:
-                ax.plot(x_values[mask], y_vals[mask], 'o', color=colors[idx],
+                ax.plot(x_values[mask], y_vals[mask], _line_fmt('o'), color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=_ms, linewidth=0,
+                        markersize=_ms, linewidth=_line_lw(0),
                         alpha=1.0, label=label)
             if np.any(mask):
                 max_mixing_time = max(max_mixing_time, float(np.max(y_vals[mask])))
@@ -1586,14 +1609,14 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
             ax.errorbar(x_plot[mask], mean_mixing_times[mask],
                         yerr=[mean_mixing_times[mask] - tau_lower[mask],
                               tau_upper[mask] - mean_mixing_times[mask]],
-                        fmt='o', color=colors[idx],
+                        fmt=_line_fmt('o'), color=colors[idx],
                         markerfacecolor=colors[idx], markeredgecolor='k',
-                        markersize=_ms, linewidth=0, alpha=1.0,
+                        markersize=_ms, linewidth=_line_lw(0), alpha=1.0,
                         capsize=3, label=label)
         else:
-            ax.plot(x_plot[finite_mask], mean_mixing_times[finite_mask], 'o', color=colors[idx],
+            ax.plot(x_plot[finite_mask], mean_mixing_times[finite_mask], _line_fmt('o'), color=colors[idx],
                     markerfacecolor=colors[idx], markeredgecolor='k',
-                    markersize=_ms, linewidth=0, alpha=1.0,
+                    markersize=_ms, linewidth=_line_lw(0), alpha=1.0,
                     label=label)
 
         if fitrange is not None:
@@ -1712,7 +1735,7 @@ def plot_ffs_mode(filenames, inset=False, ploglog=False, a_exp=None, alpha=None,
     # white fill at α≈0.5 so legend text is readable when overlapping curves
     # without fully obscuring what's behind it.
     leg = _legend_no_errorbars(ax, loc=_legloc(), frameon=True, fancybox=False,
-                               edgecolor='none', framealpha=0.5,
+                               edgecolor='none', framealpha=_legalpha(0.5),
                                title=legend_title)
     leg.get_frame().set_facecolor('white')
     leg.get_frame().set_linewidth(0)
@@ -1804,8 +1827,8 @@ def plot_diffusion_mode(filenames):
     ax.set_xlabel(xlabel or r'$\epsilon$')
     ax.set_ylabel(ylabel)
     ax.set_yscale('log')
-    ax.legend(loc=_legloc(), frameon=not True, fancybox=False,
-              edgecolor='black', framealpha=0.9)
+    _legend_no_errorbars(ax, loc=_legloc(), frameon=not True, fancybox=False,
+                         edgecolor='black', framealpha=_legalpha(0.9))
     ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
     ax.set_axisbelow(True)
     plt.tight_layout()
@@ -1951,7 +1974,7 @@ def plot_phase_diagram_mode(filenames, raw=False, pmin=None, pmax=None,
         ax.set_ylabel(ylab)
         if observable == 'mixing':
             ax.set_yscale('log')
-        leg = ax.legend(loc=_legloc(), frameon=False, title=r'$p$')
+        leg = _legend_no_errorbars(ax, loc=_legloc(), frameon=False, title=r'$p$')
         if leg.get_title():
             leg.get_title().set_fontsize(13 * 1.2)
         ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
@@ -2108,6 +2131,17 @@ def main():
                              '"center right"). Overrides the default '
                              '"best" / "lower right" choices in every '
                              'plot mode.')
+    parser.add_argument('--legend_alpha', type=float, default=None,
+                        help='Force the legend background opacity '
+                             '(framealpha) on every figure. 0 = fully '
+                             'transparent, 1 = fully opaque. Overrides '
+                             "each plot mode's hard-coded default "
+                             '(typically 0.5 or 0.9).')
+    parser.add_argument('--add_lines', action='store_true',
+                        help='Draw connecting lines between plotted data '
+                             'points (ffs / mixing / erosion modes, which '
+                             'are marker-only by default). Energy mode '
+                             'already shows connecting lines.')
     parser.add_argument('--fitrange', type=float, default=None,
                         help='ffs / mixing / energy mode: per-file linear fit '
                              'of ln(y) to the plotted x-coordinate over the '
@@ -2149,6 +2183,18 @@ def main():
     if args.legloc is not None:
         global _USER_LEGLOC
         _USER_LEGLOC = args.legloc
+
+    # Apply the --legend_alpha override (if any). Every legend site below
+    # consults _USER_LEGEND_ALPHA via _legalpha().
+    if args.legend_alpha is not None:
+        global _USER_LEGEND_ALPHA
+        _USER_LEGEND_ALPHA = args.legend_alpha
+
+    # Apply the --add_lines toggle. Each marker-only series in ffs / mixing /
+    # erosion consults _USER_ADD_LINES via _line_fmt / _line_lw.
+    if args.add_lines:
+        global _USER_ADD_LINES
+        _USER_ADD_LINES = True
 
     # Global axis-scale override: monkey-patch plt.show so that every figure
     # produced by any plot function has its scales forced to the requested

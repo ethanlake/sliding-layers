@@ -303,8 +303,17 @@ elseif mode == "mixing"
     p = parse_arg("p", p)
     p_min = parse_arg("p_min", p_min)
     p_max = parse_arg("p_max", p_max)
-    v_min = parse_arg("v_min", v_min)
-    v_max = parse_arg("v_max", v_max)
+    # Sniff for explicit --v_min/--v_max with a NaN sentinel so we can auto-flip
+    # vary_v=true when both are passed (mirrors the ffs branch). This is what lets
+    # --r set a fixed temperature for a velocity sweep: --v_min/--v_max enable the
+    # v-sweep, and --r fixes p (= temperature) via _resolve_pqtau_sliding below.
+    _v_min_user = parse_arg("v_min", NaN)
+    _v_max_user = parse_arg("v_max", NaN)
+    v_min = isnan(_v_min_user) ? v_min : _v_min_user
+    v_max = isnan(_v_max_user) ? v_max : _v_max_user
+    if !isnan(_v_min_user) && !isnan(_v_max_user)
+        vary_v = true   # auto-infer; explicit --vary_v below still wins
+    end
     n_steps = parse_arg("n_steps", n_steps)
     vary_v = parse_arg("vary_v", vary_v)
     n_trials = parse_arg("n_trials", n_trials)
