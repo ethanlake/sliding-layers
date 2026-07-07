@@ -286,6 +286,13 @@ adj = String(parse_arg("adj", ""))
 # schedule when L/v is rational with a small denominator. Pass --randshift=false
 # to opt out (legacy Bresenham). Applies to every mode that drives MC dynamics.
 randshift = parse_arg("randshift", true)
+# Global default: initialize the two chains fully polarized (all-+1) from the
+# SimulationState constructor. `--randstart=true` instead flips every spin
+# i.i.d. uniform on {-1, +1} before evolving. Meaningful in modes where the
+# steady state is invariant to init (energy, teff); silently ignored by modes
+# whose observable *measures* escape from a specific initial condition (mixing,
+# ffs, erosion_test, phase_diagram) and by history (use `--init=random` there).
+randstart = parse_arg("randstart", false)
 
 if mode == "history"
     L = parse_arg("L", L)
@@ -452,6 +459,10 @@ kwargs = Dict{Symbol, Any}()
 # erosion_test/phase_diagram) routes through evolve_*, which honours
 # randshift. Modes that don't drive MC just ignore the kwarg via kwargs....
 kwargs[:randshift] = randshift
+# Global pass-through for --randstart. Consumed by energy and teff modes;
+# other modes absorb via their trailing kwargs... and continue with the
+# polarized init they need for their observable.
+kwargs[:randstart] = randstart
 
 if mode == "history"
     kwargs[:L] = L

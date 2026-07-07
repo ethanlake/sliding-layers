@@ -19,6 +19,7 @@ function run_energy_mode(; L::Int, v::Float64, h::Float64, p::Float64,
                           sweep_values_override::Union{Nothing,Vector{Float64}}=nothing,
                           _checkpoint_adj::Union{Nothing,String}=nothing,
                           randshift::Bool=true,
+                          randstart::Bool=false,
                           kwargs...)
     sweep_p = sweep_values_override
     if vary_v
@@ -109,10 +110,15 @@ function run_energy_mode(; L::Int, v::Float64, h::Float64, p::Float64,
         end
 
         state = SimulationState(L, beta_val, h, v_cur)
-        # Random initial condition
-        state.top .= rand(Int8[-1, 1], L)
-        state.bottom .= rand(Int8[-1, 1], L)
-        recompute_mag_sum!(state)
+        # Default: polarized (all-+1 from constructor). `--randstart=true`
+        # instead flips each spin i.i.d. on {-1, +1}. Steady-state observables
+        # (⟨E⟩, ⟨Q̇⟩) are invariant to the init after T_equil burn-in; the
+        # choice just changes the transient the burn-in has to erase.
+        if randstart
+            state.top .= rand(Int8[-1, 1], L)
+            state.bottom .= rand(Int8[-1, 1], L)
+            recompute_mag_sum!(state)
+        end
 
         evolve_time!(state, T_equil; randshift)
 
