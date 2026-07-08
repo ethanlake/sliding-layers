@@ -220,7 +220,8 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
                         n_perturbations::Int=200,
                         T_response::Int=0,
                         n_samples::Int=1,
-                        single_layer::Bool=false, kwargs...)
+                        single_layer::Bool=false,
+                        randstart::Bool=false, kwargs...)
 
     # ── Sweep setup (shared by both methods) ──
     if vary_v
@@ -268,9 +269,11 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
                 @printf("  [Thread %d] %s, sample %d/%d: running...\n", tid, label, s, n_samples)
 
                 state = single_layer ? SimulationState(L, beta_val, h_val) : SimulationState(L, beta_val, h_val, v_cur)
-                state.top .= rand(Int8[-1, 1], L)
-                state.bottom .= rand(Int8[-1, 1], L)
-                recompute_mag_sum!(state)
+                if randstart
+                    state.top .= rand(Int8[-1, 1], L)
+                    state.bottom .= rand(Int8[-1, 1], L)
+                    recompute_mag_sum!(state)
+                end
                 evolve_time!(state, T_equil)
 
                 E_d = 0.0
@@ -358,9 +361,11 @@ function run_teff_mode(; L::Int, v::Float64, h::Float64, T::Float64,
         end
 
         state = single_layer ? SimulationState(L, beta_val, h_val) : SimulationState(L, beta_val, h_val, v_cur)
-        state.top .= rand(Int8[-1, 1], L)
-        state.bottom .= rand(Int8[-1, 1], L)
-        recompute_mag_sum!(state)
+        if randstart
+            state.top .= rand(Int8[-1, 1], L)
+            state.bottom .= rand(Int8[-1, 1], L)
+            recompute_mag_sum!(state)
+        end
         evolve_time!(state, T_equil)
 
         # Phase 1: Collect m(t) time series for autocorrelation
