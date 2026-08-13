@@ -16,6 +16,8 @@ The key feature is that one chain slides relative to the other at velocity $v$. 
 
 The time convention is: **1 time unit = L single-spin MC updates**, independent of $v$. In one time unit, $v$ shifts occur, so each spin slides past $v$ opposing sites between consecutive updates. When $v = 0$, no shifts occur and the system reduces to a standard two-chain Ising model.
 
+**Velocity convention.** Because only the top chain moves, the $v$ used throughout the simulation code and stored in every JLD2 file is the *relative* velocity of the two chains. The paper instead slides each chain at $\pm v$, so the paper's $v$ is half the one used here: a run at $v = 2$ appears in the paper as $v = 1$. `sliding_plotter.py` applies this factor of $1/2$ when it loads a file (see `V_SIM_TO_PAPER`), so everything it plots is already in the paper's convention.
+
 ## Metropolis Updates
 
 A single update selects a random chain and site, computes the energy change $\Delta E = 2\sigma_i(\sum_{\text{neighbors}} \sigma_j + h)$, and accepts the flip with probability $\min(1, e^{-\beta \Delta E})$. Since $\sigma \in \{-1, +1\}$ and the neighbor sum takes only values in $\{-3, -1, 1, 3\}$, there are only 8 possible $(\sigma, \text{neighbor sum})$ combinations. The acceptance probabilities are precomputed into a $2 \times 4$ lookup table at construction time, eliminating expensive `exp()` calls from the inner loop.

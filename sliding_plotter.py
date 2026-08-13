@@ -48,6 +48,15 @@ linewidth = 2.75
 marker_size = 6.5
 cmap = plt.cm.coolwarm_r
 
+# Velocity convention. The simulation slides only the top chain, by v sites per
+# unit time (see src/core.jl), so every velocity stored in a sliding-Ising JLD2
+# file is the *relative* velocity of the two chains. The paper instead slides
+# each chain at ±v, so its v is half the stored one. load_jld2_data() rescales
+# every velocity it reads by this factor, so all axes, legends and fits below
+# are already in the paper's convention: a run at stored v = 2 is plotted at
+# v = 1.
+V_SIM_TO_PAPER = 0.5
+
 # Set by main() when --cmap is provided. When non-None, it globally overrides
 # every per-file color picker below (the default coolwarm_r, the GKL rainbow,
 # the Oranges-for-v-sweep / Blues-for-p-sweep choices in plot_ffs_mode, etc.).
@@ -260,6 +269,16 @@ def load_jld2_data(filename):
             data['sweep_mode'] = sm  # 'p', 'tau', 'eta' (None on older files)
         else:
             data['mode'] = 'unknown'
+
+    # Rescale stored (relative) velocities into the paper's per-chain
+    # convention; see V_SIM_TO_PAPER. Only sliding-Ising files carry
+    # velocities: GKL and Ising-Glauber files tag themselves with 'dynamics'
+    # and reuse the 'vs' array for their η (noise-bias) sweep, so they are
+    # left untouched.
+    if data.get('dynamics') is None:
+        for key in ('v', 'vs', 'v_values', 'v_onset_values'):
+            if data.get(key) is not None:
+                data[key] = data[key] * V_SIM_TO_PAPER
 
     return data
 
@@ -1148,9 +1167,10 @@ def _add_mixing_inset(ax, curve_data, colors):
             continue
         x_fin = x[finite]
         y_fin = log_tau[finite]
-        # Restrict fit range
+        # Restrict fit range: on a v-sweep, only fit above the shearing
+        # threshold v_c ≈ 1 (in the paper's convention; see V_SIM_TO_PAPER).
         if is_vary_v:
-            fit_mask = x_fin > 2
+            fit_mask = x_fin > 1
         else:
             n_fit = max(2, len(x_fin) - len(x_fin) // 4)
             fit_mask = np.zeros(len(x_fin), dtype=bool)
@@ -1853,11 +1873,14 @@ def plot_history_mode(filenames, t_max=None, hide_ticks=False):
         L = data.get('L', mag.shape[0])
         beta_val = data.get('beta', '?')
 
-        # Shift into co-moving frame at velocity v/2
+        # Shift into the frame where the two chains move symmetrically, i.e.
+        # at the mean of their velocities. The simulation slides the top chain
+        # alone at 2v (in the paper's units, see V_SIM_TO_PAPER), so that frame
+        # travels at v.
         T_steps = mag.shape[1]
         mag_shifted = np.empty_like(mag)
         for t in range(T_steps):
-            shift = int(round(v * t / 2)) % L
+            shift = int(round(v * t)) % L
             mag_shifted[:, t] = np.roll(mag[:, t], -shift)
 
         # Discrete 3-color colormap (values are -2, 0, +2).
@@ -1897,7 +1920,7 @@ def plot_history_mode(filenames, t_max=None, hide_ticks=False):
         cbar.ax.yaxis.set_major_formatter(mathsf_fmt)
         cbar.ax.minorticks_off()
 
-        # Custom v±δ arrow overlay for the specific (L=200, v=2, β=200) file
+        # Custom v±δ arrow overlay for the specific (L=200, v=1, β=200) file
         # the user hand-annotated. The two "V" markers identify pairs of
         # domain walls travelling at slightly different velocities relative
         # to the co-moving frame; v-δ (slow) is the red one at the trajectory
@@ -1910,7 +1933,7 @@ def plot_history_mode(filenames, t_max=None, hide_ticks=False):
             L_int = int(L)
             v_val = float(v)
             beta_val_f = float(beta_val)
-            if (L_int == 200 and abs(v_val - 2.0) < 1e-6
+            if (L_int == 200 and abs(v_val - 1.0) < 1e-6
                     and abs(beta_val_f - 200.0) < 1e-6):
                 red_hex = '#FF0A29'
                 purple_hex = '#DC35FF'
