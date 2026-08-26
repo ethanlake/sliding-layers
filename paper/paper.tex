@@ -141,7 +141,7 @@
 	When $v=0$, the dynamics is simply that of a static two-leg Ising chain, and $\tmem \sim e^{O( \b J)}$. The main result of this work is to show that $\tmem$ is parametrically increased when $v$ is greater than a constant threshold. In particular, we give analytic arguments---and verify in numerics---that as long as $v > v_c$,  
 	\be \label{main_result} \tmem \sim  e^{4(\b J)^2 v   + O(\b J)},\ee
 	where 
-	\be v_c = \frac{1}{1+e^{-2 \b J}}, \ee
+	\be v_c = \frac{1 - e^{-2\b J}}{1+e^{-2 \b J}}, \ee
 	and 
 	the $\sim$ hides constant factors (see Fig.~\ref{fig:overview}~{\bf b} for a schematic phase diagram). While $\tmem$ is finite in the thermodynamic limit for all $T > 0$, it rapidly gets astronomically large as $T$ is decreased. For example, when $T = 0.6J$ and $v=2.5$, we find numerically that $\tmem \sim 10^{28}$, around 21 orders of magnitude larger than when $v=0$ at the same temperature~\footnote{In dimensionful units, typical parameters for magnetic solids would give a lifetime of $\approx 2.5\times 10^{11}$yr at $T \sim 150$K and a sliding velocity of $v \approx 5$cm ${\rm s}^{-1}$~\cite{angst2012strongly}.} (see below for more details). This enhanced lifetime does not depend on the $\zt$ spin-flip symmetry in~\eqref{ham}, and breaking it with a small magnetic field $h$ simply results in the replacement $J \mt J-|h|$.
 	The remainder of this paper is dedicated to explaining this result. 
@@ -152,7 +152,7 @@
 	
 	
 	\paragraph*{The shearing mechanism: } In the equilibrium 1d Ising model, once minority domains are created, there is nothing that compels them to shrink. Instead, they expand diffusively, and quickly erase memory of the initial magnetization. 
-	To understand why sliding changes this, consider what happens to minority domains under the sliding dynamics. Due to the interchain coupling, a minority domain on only a {\it single} chain is eroded ballistically from its endpoints, which violate two ferromagnetic bonds. From the transition rates of Glauber dynamics, the endpoints of a minority domain on a single chain contract at velocity $\d = (1+e^{-2\b J})\inv$,
+	To understand why sliding changes this, consider what happens to minority domains under the sliding dynamics. Due to the interchain coupling, a minority domain on only a {\it single} chain is eroded ballistically from its endpoints, which violate two ferromagnetic bonds. From the transition rates of Glauber dynamics, the endpoints of a minority domain on a single chain contract at velocity $\d = \tanh( \b J )$,
 	and are thus quickly eliminated. This is true even when $v=0$.
 	
 	A minority domain that spans {\it both} chains is more problematic. When $v=0$, its endpoints diffuse, and nothing in the dynamics compels it to shrink. When $v>0$ however, the sliding dynamics attempts to shear the domain, ripping it apart into two spatially-separated single-chain minority domains. The ferromagnetic interchain coupling attempts to arrest this shearing, as it favors configurations where domains on each chain ``stick'' together. But if $v >\d \equiv v_c$, it is easy to check that the domains are sheared apart faster than they stick together, and once sheared apart, they are ballistically shrunk by the mechanism discussed above. This process, viz. the ripping apart of a two-chain minority domain and the subsequent ballistic erosion of its two constituent single-chain halves, is shown in Fig.~\ref{fig:overview}~{\bf c}, and is what leads to the aforementioned increase in $\tmem$. 
